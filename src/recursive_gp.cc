@@ -70,6 +70,8 @@ void RecursiveGaussianProcess::compute() {
     return;
   }
 
+
+
   cf->loghyper_changed = false;
   size_t m_a = inducingset_pre->size();
   size_t m = inducingset->size();
@@ -122,11 +124,13 @@ void RecursiveGaussianProcess::compute() {
   elbo_0 += logDet(V) - (1 / param_alpha) * logDet(I_plus_alpha_invP_pre_Da);
 
   elbo_0 += logDet(K_RR_pre) - logDet(Sigma_u_pre);
-  
+
   elbo_0 += mean_a.dot(
       (inv_Sigma_u_pre * P_pre * inv_Sigma_u_pre - inv_Sigma_u_pre) * mean_a);
 
   elbo_0 *= 0.5;
+
+  // 初始化 eta_dot_0, Lambda_dot_0, elbo_dot_0
 }
 
 void RecursiveGaussianProcess::epochUpdate(bool verbose) {
