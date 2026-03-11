@@ -1,0 +1,262 @@
+--- Sparse GP Estimation ---
+Nonlinear Dynamic System initialized. State dim: 6, Control dim: 2
+Sparse GP Parameter Estimator initialized. 
+Test data set. Size: 7584
+LBFGS Start. Initial LML: -2143.51
+Step 0: LML = 1420.96, |g| = 1382.4
+Step 10: LML = 3581.75, |g| = 20.239
+LBFGS converged at step 16 with gradient norm 0.000385805
+LBFGS Optimization Finished. Final LML: 3582 Duration: 18328.6ms
+Optimized Hyperparameters: 0.384031 0.493605 -5.13604
+LBFGS Start. Initial LML: -1647.02
+Step 0: LML = 3543.29, |g| = 1368.05
+Step 10: LML = 4027.81, |g| = 2.90965
+LBFGS converged at step 16 with gradient norm 7.02643e-05
+LBFGS Optimization Finished. Final LML: 4027.81 Duration: 20377.7ms
+Optimized Hyperparameters:  1.28456 -1.77754 -4.35182
+LBFGS Start. Initial LML: -1643.8
+Step 0: LML = 4810.03, |g| = 1383.26
+Step 10: LML = 5910.24, |g| = 0.215019
+LBFGS converged at step 14 with gradient norm 6.0413e-05
+LBFGS Optimization Finished. Final LML: 5910.24 Duration: 15330.5ms
+Optimized Hyperparameters: 0.231307 -2.71143 -6.34508
+added 100 samples to training set.
+added 100 samples to training set.
+added 200 samples to training set.
+added 200 samples to training set.
+added 300 samples to training set.
+added 300 samples to training set.
+added 400 samples to training set.
+added 400 samples to training set.
+added 500 samples to training set.
+added 500 samples to training set.
+added 600 samples to training set.
+added 600 samples to training set.
+added 700 samples to training set.
+added 700 samples to training set.
+added 800 samples to training set.
+added 800 samples to training set.
+added 900 samples to training set.
+added 900 samples to training set.
+added 1000 samples to training set.
+added 1000 samples to training set.
+added 1100 samples to training set.
+added 1100 samples to training set.
+added 1200 samples to training set.
+added 1200 samples to training set.
+added 1300 samples to training set.
+added 1300 samples to training set.
+added 1400 samples to training set.
+added 1400 samples to training set.
+added 1500 samples to training set.
+added 1500 samples to training set.
+initialize 50 inducing points using K-means clustering
+Generation 0: Best LML = 1043.99
+Generation 10: Best LML = 1502.93
+Generation 20: Best LML = 1790.69
+Generation 30: Best LML = 1930.02
+Generation 40: Best LML = 1975.03
+Generation 50: Best LML = 2031.54
+Generation 60: Best LML = 2071.19
+Generation 70: Best LML = 2101.7
+Generation 80: Best LML = 2126.89
+Generation 90: Best LML = 2147.09
+Generation 100: Best LML = 2162.03
+Generation 110: Best LML = 2173.63
+Generation 120: Best LML = 2190.52
+Generation 130: Best LML = 2203.2
+Generation 140: Best LML = 2225.55
+Generation 150: Best LML = 2257.69
+Generation 160: Best LML = 2275.15
+Generation 170: Best LML = 2291.58
+Generation 180: Best LML = 2308.87
+Generation 190: Best LML = 2322.01
+Generation 200: Best LML = 2333.15
+Generation 210: Best LML = 2344.13
+Generation 220: Best LML = 2353.05
+Generation 230: Best LML = 2362.51
+Generation 240: Best LML = 2372.59
+Generation 250: Best LML = 2380.64
+Generation 260: Best LML = 2389.78
+Generation 270: Best LML = 2394.13
+Generation 280: Best LML = 2401.76
+Generation 290: Best LML = 2407.31
+Generation 300: Best LML = 2411.61
+Generation 310: Best LML = 2418.06
+Generation 320: Best LML = 2424.29
+Generation 330: Best LML = 2429.73
+Generation 340: Best LML = 2433.27
+Generation 350: Best LML = 2437.1
+Generation 360: Best LML = 2438.2
+Generation 370: Best LML = 2442.34
+Generation 380: Best LML = 2445.34
+Generation 390: Best LML = 2447.68
+GA Optimization Finished. Final LML: 2450.54 Duration: 5.134e+06ms
+Optimized Hyperparameters:     2.05585     2.01083     2.06366   -0.442894    -1.43316    0.492907     -3.0993   -0.147594  -0.0997482   -0.572265    0.378574  -0.0870758     1.18747    0.488848    -1.09022    0.398724   -0.408654     2.90757  -0.0223868  0.00933617   0.0210774    0.013012     2.20303    0.288963  -0.0324299 -0.00768392    0.156887     1.99818  -0.0463537    0.340537     1.80441   -0.169555     3.26075   -0.290016   0.0208446   0.0566647    0.395693     3.72223    0.806886   -0.439783   -0.505415   -0.173866     3.47533    0.273593    0.231107    -1.77351   -0.399419     2.34944     2.16394    0.780536    0.867132     0.22099     2.64207   -0.282798    0.772578   0.0614749  -0.0374242     3.07199   -0.936751     0.44797  -0.0894205   -0.336885     3.60592    -0.69608   -0.584517    0.109219     1.45843     1.44518     0.13322   -0.723149    0.126479    -1.43679     2.05222   -0.774292    0.338528   0.0484521    0.176136     2.78816    0.526066   -0.312426  -0.0119112   -0.115007     1.54192   -0.281868    0.174521  -0.0247277   -0.148038     3.02875    0.690417    0.559759  -0.0112727   -0.425961       2.733   -0.146245    0.298704    -0.32474   -0.332676     2.56198  -0.0151546   -0.849726    0.204323    0.815183    0.706062   -0.130619   0.0637924     0.01327  0.00273943     3.46713    0.161619    0.724355     1.34339    -1.64908     3.62612   -0.585002    0.424866    0.711191     0.17955     2.39967   0.0820077   -0.927157     0.32659    0.464741     1.86328  -0.0671577     1.12542     0.17591   -0.398939     2.08001     0.14058   0.0367132    0.751727    0.139452     3.32374   -0.366917    0.547975   -0.422363     -0.6342     2.65703    0.571888     0.48571   -0.228151    0.737978     2.46178     1.30754   0.0546037   -0.802559   -0.658356     1.80309     -1.6098    -0.28458     1.17079    0.690085       3.842    0.238417    0.549267    0.055113  -0.0466904     2.64375    0.374396   -0.168154   0.0551494    0.158113     2.16549    0.389507   -0.146706   0.0448519    0.137056     4.47979    0.975204    0.550751   -0.147354   -0.260769     2.49312     1.32033  -0.0928274   -0.371723    -0.86942    0.486093    -0.66827     0.61843     1.01963   -0.158201     2.17494  -0.0137464    0.956166     0.76682    0.270039     2.78522   -0.698734   -0.113973     1.26726    -1.14194     4.91381   -0.901477     -1.4352    0.926145    0.541455     2.98924   -0.280733    0.119389  0.00105358   -0.171017     2.95985   0.0519071   0.0165574  -0.0672904   -0.295874      2.6977    0.185108   -0.254757    0.859391   -0.738226     2.43465  -0.0134025    -1.03071    0.324305   -0.677862     3.40811   0.0647687    0.371754     0.10778    0.271404     3.00036   -0.273221  -0.0450875    0.249683   -0.326899     4.35081     1.39277   0.0151153    0.219393    0.418779     2.49523    0.253163   -0.411232    0.229199      -1.541     2.03516    0.305251   -0.793178    0.113801    0.306136      1.5087    0.109032     1.03384    0.127465    0.329068     4.01861   -0.700548    -1.28015   -0.113379   -0.409242     3.48771    0.376917    0.225677    -0.21843  -0.0476112
+hyperparams for state 3:   7.81344    7.4695   7.87476  0.642175  0.238554   1.63707 0.0450806
+added 100 samples to training set.
+added 100 samples to training set.
+added 200 samples to training set.
+added 200 samples to training set.
+added 300 samples to training set.
+added 300 samples to training set.
+added 400 samples to training set.
+added 400 samples to training set.
+added 500 samples to training set.
+added 500 samples to training set.
+added 600 samples to training set.
+added 600 samples to training set.
+added 700 samples to training set.
+added 700 samples to training set.
+added 800 samples to training set.
+added 800 samples to training set.
+added 900 samples to training set.
+added 900 samples to training set.
+added 1000 samples to training set.
+added 1000 samples to training set.
+added 1100 samples to training set.
+added 1100 samples to training set.
+added 1200 samples to training set.
+added 1200 samples to training set.
+added 1300 samples to training set.
+added 1300 samples to training set.
+added 1400 samples to training set.
+added 1400 samples to training set.
+added 1500 samples to training set.
+added 1500 samples to training set.
+initialize 50 inducing points using K-means clustering
+Generation 0: Best LML = 255.683
+Generation 10: Best LML = 932.343
+Generation 20: Best LML = 1808.34
+Generation 30: Best LML = 2278.33
+Generation 40: Best LML = 2652.97
+Generation 50: Best LML = 3053.98
+Generation 60: Best LML = 3426.57
+Generation 70: Best LML = 3755.18
+Generation 80: Best LML = 3938.74
+Generation 90: Best LML = 4067.9
+Generation 100: Best LML = 4122.75
+Generation 110: Best LML = 4167.07
+Generation 120: Best LML = 4218.39
+Generation 130: Best LML = 4251.89
+Generation 140: Best LML = 4276.46
+Generation 150: Best LML = 4302.5
+Generation 160: Best LML = 4330.17
+Generation 170: Best LML = 4348.54
+Generation 180: Best LML = 4368.43
+Generation 190: Best LML = 4384.56
+Generation 200: Best LML = 4401
+
+Generation 210: Best LML = 4409.64
+Generation 220: Best LML = 4418.44
+Generation 230: Best LML = 4428.57
+Generation 240: Best LML = 4436.25
+Generation 250: Best LML = 4447.31
+Generation 260: Best LML = 4454.85
+Generation 270: Best LML = 4461.34
+Generation 280: Best LML = 4467.35
+Generation 290: Best LML = 4475.77
+Generation 300: Best LML = 4482.09
+Generation 310: Best LML = 4484.67
+Generation 320: Best LML = 4494.55
+Generation 330: Best LML = 4496.17
+Generation 340: Best LML = 4499.95
+Generation 350: Best LML = 4501.24
+Generation 360: Best LML = 4509.26
+Generation 370: Best LML = 4512.73
+Generation 380: Best LML = 4518.4
+Generation 390: Best LML = 4518.77
+GA Optimization Finished. Final LML: 4518.77 Duration: 5.28152e+07ms
+Optimized Hyperparameters:      1.91101    -0.343675       1.9795    -0.118105    -0.276788     0.465654     -4.50468      2.94734     -0.24485   -0.0199301    -0.102961     0.717181         2.67     0.231035     0.479066    -0.647168    -0.713327       3.0014      0.21555    -0.832679    0.0180373    -0.435383      1.12897    -0.148673    0.0530844  -0.00461978    -0.016176      2.93094     0.270144   -0.0918841    0.0741933   -0.0298852      2.02809     0.403408    -0.162884    0.0306559     0.142988      3.66299   -0.0301261     0.248184    -0.051954     0.051236     0.999813     0.126631    -0.367958     0.263325    0.0523083      2.15977     0.138427  -0.00697682    -0.155783    -0.390349      2.45524     0.226824    -0.231178    -0.294421    -0.172791      3.58899      0.31911     0.410403    -0.117707    -0.806831      2.52992    -0.299201     0.172555   -0.0207886     -0.12085      1.95343   -0.0446628    0.0645907   -0.0381204    -0.215851      2.47647    -0.386379     0.198852    0.0081364     0.212577      2.84065     0.533868    -0.135006    0.0450886     0.146155      1.61122     0.234968    -0.111122    -0.556531     0.174442      3.41513     0.280168   -0.0552719    0.0797209     0.375539       3.0433    -0.415632    -0.682085     0.706336     -1.16643      3.33466    -0.500526    -0.608503      1.01309     0.184819      3.02962    -0.228127     0.153602   -0.0388681    -0.328061      1.83335     -0.18047    -0.450373     0.247795   -0.0433501      3.90028    0.0506117    -0.480819     0.190958    0.0758777      2.96087     0.238601 -6.08429e-05    -0.477773    -0.441641      2.82868     0.347139     0.192331     0.580862    -0.357928      3.79756    -0.379226      0.22011    -0.051398    -0.110349      3.43031  -0.00568593    0.0951645    0.0821657     0.370079       2.3159     0.421041     0.500112    -0.160893      -1.0012      4.41098     0.255336    -0.299872    0.0803934    -0.343897      1.83955     0.422826     0.555931      0.44753    -0.445889      1.99369    -0.427014     0.229409    -0.389051    -0.582036      3.49045     -0.33625     0.849455     0.289957     0.701663      1.36428    -0.133097     0.322594    -0.423579   -0.0648194      3.36641   -0.0251482    -0.148673     0.124216   0.00344343      2.20066     0.702953     0.261351     0.586529     0.368806      2.79287     0.215729    -0.122248    0.0293085     0.123372      3.59688    -0.643698     0.791323    -0.346098    -0.436693      3.10088     0.421528    -0.313308     0.108098    -0.208109      3.01241    -0.450187     0.595573    0.0955893     0.180167      2.04739    -0.433372    -0.104159    0.0105348    -0.240248      2.88338  -0.00117334        0.048   -0.0252677    -0.185117      2.29643     0.627032     0.398045     0.268004     0.143797       3.1483    0.0702676     0.887832    -0.130702    -0.751718      3.50512     0.736718     0.067549    -0.159327      1.23397       3.1115    -0.585969     0.133532    -0.375115   -0.0638974      0.74779     -1.11513    -0.465161     0.305947    -0.343891      2.29067   -0.0282608    0.0320415   -0.0282415   -0.0365655      1.73887     0.224232     -0.22805     0.493585     0.272356      2.01775      1.01373      0.40763    -0.281104     0.282563      2.47114    -0.026725    -0.651004    -0.404434    -0.253423      2.73334     0.439418     0.127395    -0.394788     0.363635
+hyperparams for state 4:   6.75989  0.709159   7.23909  0.888603  0.758215   1.59306 0.0110571
+added 100 samples to training set.
+added 100 samples to training set.
+added 200 samples to training set.
+added 200 samples to training set.
+added 300 samples to training set.
+added 300 samples to training set.
+added 400 samples to training set.
+added 400 samples to training set.
+added 500 samples to training set.
+added 500 samples to training set.
+added 600 samples to training set.
+added 600 samples to training set.
+added 700 samples to training set.
+added 700 samples to training set.
+added 800 samples to training set.
+added 800 samples to training set.
+added 900 samples to training set.
+added 900 samples to training set.
+added 1000 samples to training set.
+added 1000 samples to training set.
+added 1100 samples to training set.
+added 1100 samples to training set.
+added 1200 samples to training set.
+added 1200 samples to training set.
+added 1300 samples to training set.
+added 1300 samples to training set.
+added 1400 samples to training set.
+added 1400 samples to training set.
+added 1500 samples to training set.
+added 1500 samples to training set.
+initialize 50 inducing points using K-means clustering
+Generation 0: Best LML = 2563.97
+Generation 10: Best LML = 3045.47
+Generation 20: Best LML = 3635.96
+Generation 30: Best LML = 4047.99
+Generation 40: Best LML = 4411.75
+Generation 50: Best LML = 4573.24
+Generation 60: Best LML = 4654.56
+Generation 70: Best LML = 4689.94
+Generation 80: Best LML = 4722.21
+Generation 90: Best LML = 4759.49
+Generation 100: Best LML = 4785.59
+Generation 110: Best LML = 4810.23
+Generation 120: Best LML = 4828.19
+Generation 130: Best LML = 4841.16
+Generation 140: Best LML = 4850.79
+Generation 150: Best LML = 4858.19
+Generation 160: Best LML = 4862.23
+Generation 170: Best LML = 4868.18
+Generation 180: Best LML = 4873.87
+Generation 190: Best LML = 4878.66
+Generation 200: Best LML = 4883.28
+Generation 210: Best LML = 4887.92
+Generation 220: Best LML = 4891.44
+Generation 230: Best LML = 4895.87
+Generation 240: Best LML = 4898.85
+Generation 250: Best LML = 4901.44
+Generation 260: Best LML = 4906.69
+Generation 270: Best LML = 4908.24
+Generation 280: Best LML = 4908.89
+Generation 290: Best LML = 4912.33
+Generation 300: Best LML = 4914.09
+Generation 310: Best LML = 4915.97
+Generation 320: Best LML = 4917.21
+Generation 330: Best LML = 4920.78
+Generation 340: Best LML = 4922.97
+Generation 350: Best LML = 4926.61
+Generation 360: Best LML = 4927.36
+Generation 370: Best LML = 4930.09
+Generation 380: Best LML = 4931.21
+Generation 390: Best LML = 4932.38
+GA Optimization Finished. Final LML: 4933.75 Duration: 9.26246e+06ms
+Optimized Hyperparameters:     1.33633   -0.413596     1.65578    -1.28631    0.588169   -0.853409    -4.75887     3.70899    0.104297   -0.155942    0.134326    0.394301      2.8204   -0.853909    -0.18749   -0.206857    0.255746     2.70026 -0.00303963   0.0754963 -0.00873803   -0.134318     2.11009   -0.087176   -0.185905    0.805241   -0.443681      2.2483   0.0100067     0.19075     0.48918    0.287733     2.59665 -0.00461461     0.16299    -1.13947    0.356317     2.46268    0.634966    0.394488 -0.00246505     -1.1113      2.5939    0.302415  0.00299645   0.0281072   0.0956235     2.78927    0.135164   -0.531995   0.0501847   -0.178638     3.00353   -0.758723  -0.0463659   0.0645181   -0.774252      1.7516    0.257208     0.10142   0.0533127    0.307748     3.05058  -0.0219938     1.06022  -0.0717976    0.180947      2.6436    0.412305    0.587286   0.0385088   -0.178925     2.64121  -0.0696335   -0.106738   0.0222845    0.789812     2.48556    0.237556    0.041991   -0.211084   0.0759254     1.26628   -0.192617  -0.0514014   0.0117197   0.0138828     2.36042   -0.350511    0.184768  -0.0266087   -0.181472     2.92344     0.17866     0.51379   -0.114595   -0.204861     3.49966  0.00639728  0.00234388  -0.0234636    -0.32434     2.97027   -0.327197    0.519381   -0.357351  -0.0245139     1.80068   -0.357739   -0.225269   -0.110583   -0.730516     1.11905   -0.424543   -0.719393   0.0076931    0.559129     2.42105    -0.00867   -0.571742    -1.36139   -0.261044     2.92031   -0.356366   0.0369408    0.263376   -0.241199     1.76871   -0.121966    0.726656   -0.806161    0.633347     2.47002   -0.211923    0.107531   0.0719285    0.162957     3.12926   -0.386672   -0.906063    0.108948    0.166461     2.86129  -0.0535438    0.269477   0.0333672   -0.575502     2.15678    0.436056   -0.162129    0.222931    -1.02142     2.32351  -0.0200013   -0.386579    -1.18101   -0.536438     2.58945   -0.455116   -0.134656   -0.830324    0.328844     1.49791   -0.246663    0.661478  -0.0396936    0.111296     2.12615    0.157731   -0.550383   0.0818952    0.657326     3.30555   -0.123446   -0.467113 0.000320875    0.228756     3.17644   -0.163103  -0.0635814 -0.00740623   -0.205385     3.05094   -0.273872      0.2375    0.147402   0.0449279      2.0184   -0.537483    0.488555   -0.374509   -0.462123     3.14594   0.0471957  -0.0483704   0.0447322    0.028542     3.39251   -0.417592    0.222368  -0.0317351   -0.268849     3.27333    0.674203   0.0455534   0.0780503   -0.666537     2.58709   -0.394313   -0.297102   -0.398162   -0.605563     2.85753    0.125485    0.153269    0.166428    0.361271     1.57745    0.345523    0.317394     1.06969   0.0413465     2.26352    0.391351   -0.366601   0.0590826    0.172503     2.39847    0.499902    0.400323    0.471216    0.642856     2.43577    0.539505    0.390468   0.0111238    0.317728     2.96022    0.364763   -0.299653     0.10688    0.325958     2.67099   -0.256096    0.726246  -0.0859158   -0.520943     1.47327      0.4557   0.0903172 -0.00708473  0.00405406     1.91549    0.971617    0.246019   -0.149627    -0.11233
+hyperparams for state 5:    3.80505   0.661268    5.23716   0.276288    1.80069    0.42596 0.00857529
+Sparse GP Estimation Complete.
+Training Data Fitting Errors:
+ State 0: RMSE = 10.5208, MAE = 8.56409
+ State 1: RMSE = 6.81222, MAE = 5.42394
+ State 2: RMSE = 0.144988, MAE = 0.11788
+ State 3: RMSE = 0.0841829, MAE = 0.0669169
+ State 4: RMSE = 0.0305948, MAE = 0.0249128
+ State 5: RMSE = 0.010404, MAE = 0.00839557
+Test Data Fitting Errors:
+ State 0: RMSE = 9.58997, MAE = 7.66912
+ State 1: RMSE = 6.75871, MAE = 5.23416
+ State 2: RMSE = 0.158026, MAE = 0.125578
+ State 3: RMSE = 0.0828467, MAE = 0.0657926
+ State 4: RMSE = 0.0303693, MAE = 0.0247678
+ State 5: RMSE = 0.0103322, MAE = 0.00835985
+Visualizing state fitting results on training set...
+

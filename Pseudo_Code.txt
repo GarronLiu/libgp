@@ -1,0 +1,51 @@
+Algorithm 1 Pseudo-code of Proposed algorithm
+offline Training via Stochastic Variation Gaussian Process with Automatic Inducing point selection
+Input:	USV maneuvering state-input trajectories {x_i | x_i = [u_i v_i r_i tl_i, tr_i}^N_i=1, Smoothed Residual dynamics trajectories {a_res_i| a_res_i = [a_udot, a_vdot, a_rdot]^T}^N_i=1, initial hyperparameters for ARD kernel
+Initialize:  a candidate set of M inducing points randomly sampled from original training data
+Pre-fitting:
+	while iter < iter_max do
+	   calculate sparse GP approximation with inducing points {}
+	   calculate ELBO L(Z) with eq. ()
+	   calculate gradient of hyperparameters with automatic differentiation
+	   update hyperparameters
+	end while
+Pruning:
+	while iter < iter_max do
+	   sample a subset of inducing points according to Point Process eq. ()
+	   calculate ELBO L(Z) with eq. ()
+	   calculate gradient of variational parameters with score function estimation, eq. ()
+	   update variational parameters
+	end while
+	execute truncate on the inducing points of low informativeness
+Post-fitting:
+	while iter < iter_max do
+	   calculate sparse GP approximation with the truncated inducing point set {}
+	   calculate ELBO L(Z) with eq. ()
+	   calculate gradient of hyperparameters with automatic differentiation
+	   update hyperparameters
+	end while
+
+online update during NMPC iteration
+Initialize a NMPC solver with x_dot_t = f_nominal + sgp (USV dynamics equality constraints), udot_min < u_dot_t < udot_max, u_min < u_t < u_max (inequality constraints),
+Qxx (Weight matrix of states), Quu (Weight matrix of inputs) , delta_t (discrete time interval), H (prediction horizon)
+input: x_k (current state), u_k(current input) 
+while not interuptted
+    x_k <- stateObservation()
+    if new reference trajectory received
+       execute trajectory Discretization
+       update NMPC intermediate and final costs
+    endif
+    {x_k},{u_k} <- getNMPCSolution()
+    {x_nominal_k} <- integrateNominalODE({x_k-1},{u_k-1})
+    calculate residual dynamics with eq. ()
+    add training point into D;
+    if |D| >= batch_size
+       execute recursive update with eq. ()
+       obtaining new posterior mean and covariance of inducing points
+       clear D
+    endif 
+    update dynamics equality constraint of NMPC solver
+endwhile
+	
+	
+
