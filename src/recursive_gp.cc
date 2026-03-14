@@ -70,8 +70,6 @@ void RecursiveGaussianProcess::compute() {
     return;
   }
 
-
-
   cf->loghyper_changed = false;
   size_t m_a = inducingset_pre->size();
   size_t m = inducingset->size();
@@ -83,26 +81,26 @@ void RecursiveGaussianProcess::compute() {
   K_aa.diagonal().array() -= noise_variance + 1e-6; // subtract noise variance
 
   if (pass_pretrain_needed_flag) {
-    K_RR_pre = K_aa;
-    inv_K_RR_pre = chol_inverse(K_aa);
+    K_aa_pre = K_aa;
+    inv_K_aa_pre = chol_inverse(K_aa);
     inv_Sigma_u_pre = chol_inverse(Sigma_u_pre);
 
-    invP_pre = inv_Sigma_u_pre - inv_K_RR_pre; // inv(P_pre)
+    invP_pre = inv_Sigma_u_pre - inv_K_aa_pre; // inv(P_pre)
     P_pre = chol_inverse(invP_pre);
 
     pass_pretrain_needed_flag = false;
   }
 
-  Eigen::MatrixXd K_RR(m, m);
-  computeKernelMatrixLowerHalf(K_RR, inducingset, cf);
-  K_RR.diagonal().array() -= noise_variance + 1e-6; // subtract noise variance
-  Lambda_0 = chol_inverse(K_RR);
+  Eigen::MatrixXd K_bb(m, m);
+  computeKernelMatrixLowerHalf(K_bb, inducingset, cf);
+  K_bb.diagonal().array() -= noise_variance + 1e-6; // subtract noise variance
+  Lambda_0 = chol_inverse(K_bb);
 
-  Eigen::MatrixXd K_aR;
-  computeKernelMatrix(K_aR, inducingset_pre, inducingset, cf);
+  Eigen::MatrixXd K_ab;
+  computeKernelMatrix(K_ab, inducingset_pre, inducingset, cf);
 
-  Eigen::MatrixXd H = K_aR * Lambda_0; // 目前Lambda_0 = inv(K_RR)
-  Eigen::MatrixXd H_K_Ra = H * K_aR.transpose();
+  Eigen::MatrixXd H = K_ab * Lambda_0; // 目前Lambda_0 = inv(K_bb)
+  Eigen::MatrixXd H_K_Ra = H * K_ab.transpose();
   Eigen::MatrixXd Da = K_aa - H_K_Ra;
   Eigen::MatrixXd V = P_pre + param_alpha * (Da);
   Eigen::MatrixXd invV_H = chol_solve(V, H);
@@ -116,14 +114,14 @@ void RecursiveGaussianProcess::compute() {
 
   Eigen::MatrixXd V_plus_H_K_Ra = V + H_K_Ra;
   Eigen::VectorXd alpha_y_a = chol_solve(V_plus_H_K_Ra, y_a);
-  elbo_0 = - logDet(V_plus_H_K_Ra) - y_a.dot(alpha_y_a);
+  elbo_0 = -logDet(V_plus_H_K_Ra) - y_a.dot(alpha_y_a);
 
   Eigen::MatrixXd I_plus_alpha_invP_pre_Da =
       Eigen::MatrixXd::Identity(m_a, m_a);
   I_plus_alpha_invP_pre_Da += param_alpha * invP_pre * Da;
   elbo_0 += logDet(V) - (1 / param_alpha) * logDet(I_plus_alpha_invP_pre_Da);
 
-  elbo_0 += logDet(K_RR_pre) - logDet(Sigma_u_pre);
+  elbo_0 += logDet(K_aa_pre) - logDet(Sigma_u_pre);
 
   elbo_0 += mean_a.dot(
       (inv_Sigma_u_pre * P_pre * inv_Sigma_u_pre - inv_Sigma_u_pre) * mean_a);
@@ -131,6 +129,118 @@ void RecursiveGaussianProcess::compute() {
   elbo_0 *= 0.5;
 
   // 初始化 eta_dot_0, Lambda_dot_0, elbo_dot_0
+
+  int update_param_dim =
+      cf->get_param_dim(); //在线学习时只更新超参数，诱导点位置不更新
+
+  eta_dot_0.resize(update_param_dim);
+  Lambda_dot_0.resize(update_param_dim);
+  elbo_dot_0.resize(update_param_dim);
+
+  //初始化基础的矩阵导数：
+  std::vector<Eigen::MatrixXd> K_aa_dot(update_param_dim);
+  std::vector<Eigen::MatrixXd> K_ab_dot(update_param_dim);
+  std::vector<Eigen::MatrixXd> K_bb_dot(update_param_dim);
+  for (size_t i = 0; i < update_param_dim; i++) {
+    K_ab_dot[i] = Eigen::MatrixXd::Zero(m_a, m);
+    K_bb_dot[i] = Eigen::MatrixXd::Zero(m, m);
+    K_aa_dot[i] = Eigen::MatrixXd::Zero(m_a, m_a);
+  }
+  //填充导数矩阵
+  Eigen::VectorXd g_hyper;
+  size_t hyperParam_dim = cf->get_param_dim();
+  // K_ab_dot
+  for (size_t i = 0; i < m_a; i++) {
+    for (size_t j = 0; j < m; j++) {
+      g_hyper.setZero(hyperParam_dim);
+      cf->grad(inducingset_pre->x(j), inducingset->x(i), g_hyper);
+      for (size_t p = 0; p < update_param_dim; p++) {
+        K_ab_dot[p](i, j) = g_hyper(p);
+      }
+    }
+  }
+  // K_bb_dot
+  for (size_t i = 0; i < m; i++) {
+    for (size_t j = 0; j <= i; j++) {
+      g_hyper.setZero(hyperParam_dim);
+      cf->grad(inducingset->x(j), inducingset->x(i), g_hyper);
+      for (size_t p = 0; p < update_param_dim; p++) {
+        K_bb_dot[p](i, j) = g_hyper(p);
+        if (j != i)
+          K_bb_dot[p](j, i) = g_hyper(p); // symmetry property
+      }
+    }
+  }
+  // K_aa_dot
+  for (size_t i = 0; i < m_a; i++) {
+    for (size_t j = 0; j <= i; j++) {
+      g_hyper.setZero(hyperParam_dim);
+      cf->grad(inducingset_pre->x(j), inducingset_pre->x(i), g_hyper);
+      for (size_t p = 0; p < update_param_dim; p++) {
+        K_aa_dot[p](i, j) = g_hyper(p);
+        if (j != i)
+          K_aa_dot[p](j, i) = g_hyper(p); // symmetry property
+      }
+    }
+  }
+
+  Eigen::MatrixXd inv_K_bb = chol_inverse(K_bb);
+  Eigen::MatrixXd inv_Lambda_0 = K_bb;
+  Eigen::MatrixXd S_0 = H * inv_Lambda_0 * H.transpose() + V;
+  Eigen::MatrixXd inv_S_0 = chol_inverse(S_0);
+  Eigen::MatrixXd Lambda_1 = Lambda_0;
+
+  Eigen::MatrixXd H_dot_0;
+  std::vector<Eigen::MatrixXd> V_dot_0(update_param_dim);
+  std::vector<Eigen::MatrixXd> Lambda_dot_1(update_param_dim);
+
+  //定义矩阵逐元素相乘后所有元素求和的函数
+  auto elementwise_sum = [](const Eigen::MatrixXd &mat,
+                            const Eigen::MatrixXd &other) {
+    return (mat.array() * other.array()).sum();
+  };
+
+  for (size_t p = 0; p < update_param_dim; p++) {
+    Lambda_dot_0[p] = -inv_K_bb * K_bb_dot[p] * inv_K_bb;
+    H_dot_0 = K_ab_dot[p] * inv_K_bb + K_ab * Lambda_dot_0[p];
+    V_dot_0[p] = param_alpha * (K_aa_dot[p] - H_dot_0 * K_ab.transpose() -
+                                H * K_ab_dot[p].transpose());
+    Lambda_dot_1[p] = Lambda_dot_0[p] + H_dot_0.transpose() * invV_H -
+                      invV_H.transpose() * V_dot_0[p] * invV_H +
+                      invV_H.transpose() * H_dot_0.transpose();
+
+    //计算dpsi_dLambda_0;
+    elbo_dot_0[p] = 0;
+    Eigen::MatrixXd elbo_deriv;
+    {
+      Eigen::VectorXd temp_vec = inv_Lambda_0 * H.transpose() * inv_S_0 * y_a;
+      elbo_deriv = -inv_Lambda_0 + temp_vec * temp_vec.transpose();
+    }
+    elbo_dot_0[p] += elementwise_sum(elbo_deriv, Lambda_dot_0[p]);
+    //计算dpsi_dH_0
+    {
+      Eigen::VectorXd temp_vec = inv_S_0 * y_a;
+      elbo_deriv = -2.0 * temp_vec * temp_vec.transpose() * H * inv_Lambda_0;
+    }
+    elbo_dot_0[p] += elementwise_sum(elbo_deriv, H_dot_0);
+    //计算dpsi_dV_0
+    {
+      Eigen::VectorXd temp_vec = inv_S_0 * y_a;
+      Eigen::MatrixXd invV = chol_inverse(V);
+      elbo_deriv =
+          -1.0 * temp_vec * temp_vec.transpose() + (1.0 / param_alpha) * invV;
+    }
+    elbo_dot_0[p] += elementwise_sum(elbo_deriv, V_dot_0[p]);
+    //计算dpsi_dLambda_1
+    elbo_deriv = chol_inverse(Lambda_1);
+    elbo_dot_0[p] += elementwise_sum(elbo_deriv, Lambda_dot_1[p]);
+    elbo_dot_0[p] *= -0.5;
+  }
+
+  //最后用Lambda_dot_1更新Lambda_dot_0
+  for (size_t p = 0; p < update_param_dim; p++) {
+    Lambda_dot_0[p] = Lambda_dot_1[p];
+  }
 }
 
 void RecursiveGaussianProcess::epochUpdate(bool verbose) {

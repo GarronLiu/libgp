@@ -143,7 +143,7 @@ protected:
   double param_alpha = 0.5; //0 < alpha <=1, alpha =1 corresponds to FITC, alpha->0 corresponds to VFE
 
   // variables related to pretrained posterior
-  Eigen::MatrixXd inv_K_RR_pre, K_RR_pre;
+  Eigen::MatrixXd inv_K_aa_pre, K_aa_pre;
   Eigen::MatrixXd inv_Sigma_u_pre, Sigma_u_pre;
   Eigen::MatrixXd P_pre, invP_pre;
 
