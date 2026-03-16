@@ -243,7 +243,6 @@ void RecursiveGaussianProcess::compute() {
   for (size_t p = 0; p < update_param_dim; p++) {
     Lambda_dot_0[p] = Lambda_dot_1[p];
   }
-  //TODO:eta_dot_0
   
 }
 
