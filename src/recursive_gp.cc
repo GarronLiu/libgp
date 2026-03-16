@@ -204,12 +204,13 @@ void RecursiveGaussianProcess::compute() {
     Lambda_dot_0[p] = -inv_K_bb * K_bb_dot[p] * inv_K_bb;
     H_dot_0 = K_ab_dot[p] * inv_K_bb + K_ab * Lambda_dot_0[p];
     V_dot_0 = param_alpha * (K_aa_dot[p] - H_dot_0 * K_ab.transpose() -
-                                H * K_ab_dot[p].transpose());
+                             H * K_ab_dot[p].transpose());
     Lambda_dot_1[p] = Lambda_dot_0[p] + H_dot_0.transpose() * invV_H -
                       invV_H.transpose() * V_dot_0 * invV_H +
                       invV_H.transpose() * H_dot_0.transpose();
     Eigen::MatrixXd invV = chol_inverse(V);
-    eta_dot_0[p] = (H_dot_0.transpose() -invV_H.transpose() * V_dot_0 ) * invV * y_a;
+    eta_dot_0[p] =
+        (H_dot_0.transpose() - invV_H.transpose() * V_dot_0) * invV * y_a;
 
     //计算dpsi_dLambda_0;
     elbo_dot_0[p] = 0;
@@ -228,7 +229,7 @@ void RecursiveGaussianProcess::compute() {
     //计算dpsi_dV_0
     {
       Eigen::VectorXd temp_vec = inv_S_0 * y_a;
-      
+
       elbo_deriv =
           -1.0 * temp_vec * temp_vec.transpose() + (1.0 / param_alpha) * invV;
     }
@@ -243,7 +244,6 @@ void RecursiveGaussianProcess::compute() {
   for (size_t p = 0; p < update_param_dim; p++) {
     Lambda_dot_0[p] = Lambda_dot_1[p];
   }
-  
 }
 
 void RecursiveGaussianProcess::epochUpdate(bool verbose) {
@@ -264,57 +264,55 @@ void RecursiveGaussianProcess::epochUpdate(bool verbose) {
   size_t batch_size = 50;
   size_t param_dim = cf->get_param_dim() + m * input_dim;
 
-  //add new inducing points
+  // add new inducing points
   double novelty_threshold =
       0.2 * std::exp(cf->get_loghyper()(cf->get_param_dim() - 2) *
                      2.0); //使用signal_variance的1/5作为阈值
   Eigen::MatrixXd K_RR(m, m);
   computeKernelMatrixLowerHalf(K_RR, inducingset, cf);
-  double noise_variance = std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2.0);
+  double noise_variance =
+      std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2.0);
   auto invK_RR = chol_inverse(K_RR);
   size_t add_inducing_point_count = 0;
-  for(size_t i=0; i< n; i++){
+  for (size_t i = 0; i < n; i++) {
     //计算novelty：gama = K_tt-K_tr * inv(K_rr) * K_rt
     Eigen::VectorXd k_rt(m);
     Eigen::VectorXd x_t = sampleset->x(i);
-    for(size_t j=0; j<m; j++){
+    for (size_t j = 0; j < m; j++) {
       k_rt(j) = cf->get(x_t, inducingset->x(j));
     }
     Eigen::VectorXd v = invK_RR * k_rt;
     double k_tt = cf->get(x_t, x_t) - noise_variance;
-    double novelty_score = k_tt - v.dot(k_rt.transpose());
-    if(novelty_score > novelty_threshold){
+    double gamma = k_tt - v.dot(k_rt.transpose());
+    if (gamma > novelty_threshold) {
       inducingset->add(x_t.data(), 0.0);
       //通过分块矩阵拓展的方式更新inv(K_RR)
       size_t new_m = inducingset->size();
       auto v = invK_RR * k_rt;
-      double gamma = k_tt - v.dot(k_rt.transpose());
       invK_RR.conservativeResize(new_m, new_m);
-      if(gamma > 0){
-        double alpha = 1.0/gamma;
-        invK_RR.bottomLeftCorner(1, m) = -alpha * v.transpose();
-        invK_RR.topRightCorner(m, 1) = -alpha * v;
-        invK_RR(new_m, new_m) = alpha;
-      }
+      double alpha = 1.0 / gamma;
+      invK_RR.topLeftCorner(m, m) += alpha * v * v.transpose();
+      invK_RR.block(m, 0, 1, m) = -alpha * v.transpose();
+      invK_RR.block(0, m, m, 1) = -alpha * v;
+      invK_RR(m, m) = alpha;
       m = new_m;
       add_inducing_point_count++;
     }
   }
-  //add new inducing points
+  // add new inducing points
 
   if (add_inducing_point_count > 0) {
     std::cout << "Added " << add_inducing_point_count << " new inducing points."
               << std::endl;
-    //TODO: 基于历史伪观测更新新诱导点的后验
+    // TODO: 基于历史伪观测更新新诱导点的后验
   }
 
-  // 先完成一个epoch的递归更新，然后再执行后面删除诱导点的必要操作，不然可能刚新加入的诱导点就被删除了
+  // 先完成一个epoch的递归更新(无需超参更新），然后再执行后面删除诱导点的必要操作，不然可能刚新加入的诱导点就被删除了
 
-  //delete inducing points if its size exceeds a certain threshold
-  //TODO:计算score
+  // delete inducing points if its size exceeds a certain threshold
+  // TODO:计算score
 
-  //delete inducing points
-
+  // delete inducing points
 
   if (!adam_optimizer) {
     adam_optimizer.reset(new AdamOptimizer(param_dim, 0.005));
@@ -411,7 +409,7 @@ void RecursiveGaussianProcess::batchUpdate(
     novelty_scores[i] = k_xx - v.dot(v);
   }
   // 若最大的 novelty score 超过阈值，则将该点加入诱导集
-  
+
   double last_novelty_score = 0.0;
   size_t last_novelty_index = 0;
   for (size_t i = 0; i < b; i++) {
