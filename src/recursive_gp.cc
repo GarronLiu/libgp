@@ -191,7 +191,7 @@ void RecursiveGaussianProcess::compute() {
   Eigen::MatrixXd Lambda_1 = Lambda_0;
 
   Eigen::MatrixXd H_dot_0;
-  std::vector<Eigen::MatrixXd> V_dot_0(update_param_dim);
+  Eigen::MatrixXd V_dot_0;
   std::vector<Eigen::MatrixXd> Lambda_dot_1(update_param_dim);
 
   //定义矩阵逐元素相乘后所有元素求和的函数
@@ -203,11 +203,13 @@ void RecursiveGaussianProcess::compute() {
   for (size_t p = 0; p < update_param_dim; p++) {
     Lambda_dot_0[p] = -inv_K_bb * K_bb_dot[p] * inv_K_bb;
     H_dot_0 = K_ab_dot[p] * inv_K_bb + K_ab * Lambda_dot_0[p];
-    V_dot_0[p] = param_alpha * (K_aa_dot[p] - H_dot_0 * K_ab.transpose() -
+    V_dot_0 = param_alpha * (K_aa_dot[p] - H_dot_0 * K_ab.transpose() -
                                 H * K_ab_dot[p].transpose());
     Lambda_dot_1[p] = Lambda_dot_0[p] + H_dot_0.transpose() * invV_H -
-                      invV_H.transpose() * V_dot_0[p] * invV_H +
+                      invV_H.transpose() * V_dot_0 * invV_H +
                       invV_H.transpose() * H_dot_0.transpose();
+    Eigen::MatrixXd invV = chol_inverse(V);
+    eta_dot_0[p] = (H_dot_0.transpose() -invV_H.transpose() * V_dot_0 ) * invV * y_a;
 
     //计算dpsi_dLambda_0;
     elbo_dot_0[p] = 0;
@@ -226,11 +228,11 @@ void RecursiveGaussianProcess::compute() {
     //计算dpsi_dV_0
     {
       Eigen::VectorXd temp_vec = inv_S_0 * y_a;
-      Eigen::MatrixXd invV = chol_inverse(V);
+      
       elbo_deriv =
           -1.0 * temp_vec * temp_vec.transpose() + (1.0 / param_alpha) * invV;
     }
-    elbo_dot_0[p] += elementwise_sum(elbo_deriv, V_dot_0[p]);
+    elbo_dot_0[p] += elementwise_sum(elbo_deriv, V_dot_0);
     //计算dpsi_dLambda_1
     elbo_deriv = chol_inverse(Lambda_1);
     elbo_dot_0[p] += elementwise_sum(elbo_deriv, Lambda_dot_1[p]);
@@ -241,6 +243,8 @@ void RecursiveGaussianProcess::compute() {
   for (size_t p = 0; p < update_param_dim; p++) {
     Lambda_dot_0[p] = Lambda_dot_1[p];
   }
+  //TODO:eta_dot_0
+  
 }
 
 void RecursiveGaussianProcess::epochUpdate(bool verbose) {
