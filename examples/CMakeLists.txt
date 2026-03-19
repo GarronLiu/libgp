@@ -20,14 +20,14 @@ include_directories(
         ${EIGEN3_INCLUDE_DIR}
 )
 
-add_executable(2D_example 2D_example.cc)
-target_link_libraries(2D_example gp ${Python3_LIBRARIES})
+# add_executable(2D_example 2D_example.cc)
+# target_link_libraries(2D_example gp ${Python3_LIBRARIES})
 
-add_executable(toy_example toy_example.cc)
-target_link_libraries(toy_example gp ${Python3_LIBRARIES})
+# add_executable(toy_example toy_example.cc)
+# target_link_libraries(toy_example gp ${Python3_LIBRARIES})
 
-add_executable(periodic_example periodic_example.cc)
-target_link_libraries(periodic_example gp ${Python3_LIBRARIES} casadi::casadi)
+# add_executable(periodic_example periodic_example.cc)
+# target_link_libraries(periodic_example gp ${Python3_LIBRARIES} casadi::casadi)
 
 # add_executable(recursive_gp_example recursive_gp_example.cc)
 # target_link_libraries(recursive_gp_example gp ${Python3_LIBRARIES})
@@ -38,11 +38,11 @@ target_link_libraries(periodic_example gp ${Python3_LIBRARIES} casadi::casadi)
 # add_executable(usvResidualDynamicsGP usvResidualDynamicsGP.cc)
 # target_link_libraries(usvResidualDynamicsGP gp ${Python3_LIBRARIES})
 
-add_executable(cppad_example cppad_example.cc)
-target_link_libraries(cppad_example gp ${Python3_LIBRARIES})
-
 add_executable(casadi_example casadi_example.cc)
 target_link_libraries(casadi_example gp ${Python3_LIBRARIES} casadi::casadi)
 
 add_executable(maneuvering_example_KVLCC2 maneuvering_example_KVLCC2.cc)
 target_link_libraries(maneuvering_example_KVLCC2 gp ${Python3_LIBRARIES} casadi::casadi)
+
+add_executable(test_recursive test/test_recursive_pretrain.cc)
+target_link_libraries(test_recursive gp ${Python3_LIBRARIES} casadi::casadi)

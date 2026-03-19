@@ -116,6 +116,8 @@ protected:
 
   Eigen::MatrixXd Q_pred;
 
+  Eigen::MatrixXd cov_inducing;
+
   Eigen::MatrixXd U; // U = L_K_RR^{-1} * K_RX; U^T * U = K_XR * K_RR^(-1) * K_RX
 
   void update_k_star(const Eigen::VectorXd &x_star) override;

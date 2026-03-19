@@ -1,7 +1,6 @@
 #include "gp.h"
 #include "gp_utils.h"
 #include "matplotlibcpp.h"
-#include "recursive_gp.h"
 #include "sparse_gp.h"
 #include <Eigen/Dense>
 

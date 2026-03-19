@@ -136,8 +136,9 @@ public:
   void setInducingTargetZeros();
 
 protected:
-  Eigen::VectorXd alpha_R; // K_RR^-1 * u
-  Eigen::MatrixXd L_R;    // var_star = k_star_star - k_star^T * L_R^-T * L_R^-1 * k_star
+  using SparseGaussianProcess::alpha_R;
+  using SparseGaussianProcess::Q_pred;
+  using SparseGaussianProcess::cov_inducing;
 
   //PEP training condition
   double param_alpha = 0.5; //0 < alpha <=1, alpha =1 corresponds to FITC, alpha->0 corresponds to VFE
@@ -149,7 +150,7 @@ protected:
 
   SampleSet* inducingset_pre;  // inducing points
 
-  bool pass_pretrain_needed_flag = true;
+  bool old_posterior_need_store = false;
 
   // inline Cholesky helpers to simplify repeated patterns below
   inline auto chol_lower(const Eigen::MatrixXd &A) -> Eigen::MatrixXd {
@@ -198,7 +199,14 @@ protected:
   std::unique_ptr<AdamOptimizer> adam_optimizer;
 
   void compute() override;
-  
+
+  void addNewInducingPoints();
+
+  void storeOldPosterior();
+
+  void updatePosteriorWithHistoryInfo(bool grad_cal);
+
+  void deleteRedundantInducingPoints();
 
 };
 }  // namespace libgp

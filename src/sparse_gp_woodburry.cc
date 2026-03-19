@@ -159,13 +159,13 @@ SparseGaussianProcess::SparseGaussianProcess(const char *filename) {
     }
 
     // 6. inducing posterior covariance
-    Eigen::MatrixXd cov_u(m, m);
+    cov_inducing.resize(m, m);
     if (config["inducing_cov"]) {
       std::vector<std::vector<double>> cov_rows =
           config["inducing_cov"].as<std::vector<std::vector<double>>>();
       for (size_t i = 0; i < m; ++i) {
         for (size_t j = 0; j < m; ++j) {
-          cov_u(i, j) = cov_rows[i][j];
+          cov_inducing(i, j) = cov_rows[i][j];
         }
       }
     }
@@ -267,7 +267,7 @@ void SparseGaussianProcess::compute() {
   B.noalias() += U_scaled * U.transpose();
 
   L_B.resize(m,m);
-  L_B = B.llt().matrixL();
+  L_B = B.llt().matrixL(); 
 
   const std::vector<double> &targets = sampleset->y();
   Eigen::Map<const Eigen::VectorXd> y(&targets[0], n);
@@ -288,6 +288,7 @@ void SparseGaussianProcess::compute() {
   alpha_R = L_K_RR.triangularView<Eigen::Lower>().adjoint().solve(temp);
   
   // compute the posterior mean of inducing points
+  K_RR = K_RR.selfadjointView<Eigen::Lower>();
   Eigen::VectorXd mean_u = K_RR * alpha_R; 
   for (size_t i = 0; i < m; ++i) {
     inducingset->set_y(i, mean_u(i));
