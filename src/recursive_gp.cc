@@ -278,9 +278,9 @@ void RecursiveGaussianProcess::updatePosteriorWithHistoryInfo(bool grad_cal) {
   // K_ab_dot
   for (size_t i = 0; i < m_a; i++) {
     for (size_t j = 0; j < m; j++) {
-      g_hyper.setZero(hyperParam_dim);
-      cf->grad(inducingset_pre->x(j), inducingset->x(i), g_hyper);
-      for (size_t p = 0; p < update_param_dim; p++) {
+      g_hyper.setZero(update_param_dim);
+      cf->grad(inducingset_pre->x(i), inducingset->x(j), g_hyper);
+      for (size_t p = 0; p < hyperParam_dim; p++) {
         K_ab_dot[p](i, j) = g_hyper(p);
       }
     }
@@ -288,9 +288,9 @@ void RecursiveGaussianProcess::updatePosteriorWithHistoryInfo(bool grad_cal) {
   // K_bb_dot
   for (size_t i = 0; i < m; i++) {
     for (size_t j = 0; j <= i; j++) {
-      g_hyper.setZero(hyperParam_dim);
+      g_hyper.setZero(update_param_dim);
       cf->grad(inducingset->x(j), inducingset->x(i), g_hyper);
-      for (size_t p = 0; p < update_param_dim; p++) {
+      for (size_t p = 0; p < hyperParam_dim; p++) {
         K_bb_dot[p](i, j) = g_hyper(p);
         if (j != i)
           K_bb_dot[p](j, i) = g_hyper(p); // symmetry property
@@ -300,16 +300,15 @@ void RecursiveGaussianProcess::updatePosteriorWithHistoryInfo(bool grad_cal) {
   // K_aa_dot
   for (size_t i = 0; i < m_a; i++) {
     for (size_t j = 0; j <= i; j++) {
-      g_hyper.setZero(hyperParam_dim);
+      g_hyper.setZero(update_param_dim);
       cf->grad(inducingset_pre->x(j), inducingset_pre->x(i), g_hyper);
-      for (size_t p = 0; p < update_param_dim; p++) {
+      for (size_t p = 0; p < hyperParam_dim; p++) {
         K_aa_dot[p](i, j) = g_hyper(p);
         if (j != i)
           K_aa_dot[p](j, i) = g_hyper(p); // symmetry property
       }
     }
   }
-
   Eigen::MatrixXd inv_K_bb = chol_inverse(K_bb);
   Eigen::MatrixXd inv_Lambda_0 = K_bb;
   Eigen::MatrixXd S_0 = H * inv_Lambda_0 * H.transpose() + V;
@@ -341,11 +340,10 @@ void RecursiveGaussianProcess::updatePosteriorWithHistoryInfo(bool grad_cal) {
                              H * K_ab_dot[p].transpose());
     Lambda_dot_1 = Lambda_dot_0[p] + H_dot_0.transpose() * invV_H -
                    invV_H.transpose() * V_dot_0 * invV_H +
-                   invV_H.transpose() * H_dot_0.transpose();
+                   invV_H.transpose() * H_dot_0;
     Eigen::MatrixXd invV = chol_inverse(V);
     eta_dot_0[p] =
         (H_dot_0.transpose() - invV_H.transpose() * V_dot_0) * invV * y_a;
-
     //计算dpsi_dLambda_0;
     elbo_dot_0[p] = 0;
     Eigen::MatrixXd elbo_deriv;
@@ -416,6 +414,7 @@ void RecursiveGaussianProcess::epochUpdate(bool verbose) {
   }
 
   old_posterior_need_store = true;
+
   storeOldPosterior();
 
   addNewInducingPoints();
@@ -438,44 +437,48 @@ void RecursiveGaussianProcess::epochUpdate(bool verbose) {
 
   // return;
 
-  size_t batch_size = 50;
+  size_t batch_size = 20;
   size_t param_dim = cf->get_param_dim();
   size_t n = sampleset->size();
-  // if (!adam_optimizer) {
-  //   adam_optimizer.reset(new AdamOptimizer(param_dim, 0.005));
-  // }
+  if (!adam_optimizer) {
+    adam_optimizer.reset(new AdamOptimizer(param_dim, 0.001));
+  }
 
   size_t max_batches = (n + batch_size - 1) / batch_size;
   auto random_indices = Utils::randperm(n);
 
-  recursive_initialized = false;
+  for (size_t epoch = 0; epoch < 100; epoch++) {
+    std::cout << "Epoch: " << epoch << std::endl;
+    recursive_initialized = false;
+    auto random_indices = Utils::randperm(n);
+    for (size_t k = 0; k < max_batches; ++k) {
+      std::vector<Eigen::VectorXd> batch_inputs(batch_size);
+      Eigen::VectorXd batch_targets(batch_size);
 
-  for (size_t k = 0; k < max_batches; ++k) {
-    std::vector<Eigen::VectorXd> batch_inputs(batch_size);
-    Eigen::VectorXd batch_targets(batch_size);
+      size_t current_batch_size = 0;
+      for (size_t i = 0; i < batch_size; ++i) {
+        size_t idx = k * batch_size + i;
+        if (idx >= n)
+          break;
 
-    size_t current_batch_size = 0;
-    for (size_t i = 0; i < batch_size; ++i) {
-      size_t idx = k * batch_size + i;
-      if (idx >= n)
-        break;
+        batch_inputs[i] = sampleset->x(random_indices[idx]);
+        batch_targets(i) = sampleset->y(random_indices[idx]);
+        current_batch_size++;
+      }
 
-      batch_inputs[i] = sampleset->x(random_indices[idx]);
-      batch_targets(i) = sampleset->y(random_indices[idx]);
-      current_batch_size++;
+      // 调整最后一次可能不满的 batch
+      if (current_batch_size < batch_size) {
+        batch_inputs.resize(current_batch_size);
+        batch_targets.conservativeResize(current_batch_size);
+      }
+
+      batchUpdate(batch_inputs, batch_targets, true, true);
+
+      Eigen::VectorXd params = get_hyperparameters();
+
+      adam_optimizer->step(elbo_dot_0, params);
+      update_hyperparameters(params);
     }
-
-    // 调整最后一次可能不满的 batch
-    if (current_batch_size < batch_size) {
-      batch_inputs.resize(current_batch_size);
-      batch_targets.conservativeResize(current_batch_size);
-    }
-
-    batchUpdate(batch_inputs, batch_targets);
-
-    // Eigen::VectorXd params = get_hyperparameters();
-    // adam_optimizer->step(elbo_dot_0, params);
-    // update_hyperparameters(params);
   }
 
   Eigen::VectorXd mean_inducing = chol_solve(Lambda_0, eta_0);
@@ -487,9 +490,20 @@ void RecursiveGaussianProcess::epochUpdate(bool verbose) {
   cf->loghyper_changed = true;
 }
 
+Eigen::VectorXd RecursiveGaussianProcess::get_hyperparameters() {
+  Eigen::VectorXd cov_params = cf->get_loghyper();
+  return cov_params;
+}
+
+void RecursiveGaussianProcess::update_hyperparameters(
+    const Eigen::VectorXd &params) {
+  cf->set_loghyper(params);
+}
+
 void RecursiveGaussianProcess::batchUpdate(
     const std::vector<Eigen::VectorXd> &batch_inputs,
-    const Eigen::VectorXd &batch_targets) {
+    const Eigen::VectorXd &batch_targets, bool hyperParam_opt,
+    bool inducing_opt) {
   size_t m = inducingset->size();
   size_t b = batch_inputs.size();
 
@@ -507,7 +521,7 @@ void RecursiveGaussianProcess::batchUpdate(
   }
 
   if (!recursive_initialized) {
-    updatePosteriorWithHistoryInfo(false); // 先计算一次 elbo_dot_0
+    updatePosteriorWithHistoryInfo(hyperParam_opt); // 先计算一次 elbo_dot_0
     elbo_0 -= 0.5 * static_cast<double>(sampleset->size()) * log2pi;
     recursive_initialized = true;
   }
@@ -517,9 +531,8 @@ void RecursiveGaussianProcess::batchUpdate(
   for (size_t i = 0; i < b; i++) {
     batchSet->add(batch_inputs[i].data(), batch_targets(i));
   }
-
-  double noise_variance =
-      std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2.0);
+  size_t noise_idx = cf->get_param_dim() - 1;
+  double noise_variance = std::exp(cf->get_loghyper()(noise_idx) * 2.0);
 
   /// STEP:计算基础矩阵
   Eigen::MatrixXd K_RR(m, m);
@@ -564,101 +577,159 @@ void RecursiveGaussianProcess::batchUpdate(
   bound += (1 / param_alpha) * diag_V.array().log().sum();
   elbo_0 -= 0.5 * bound;
 
-  if (0) {
-    /// STEP:calculate derivatives of basic matrices
-    int update_param_dim =
-        cf->get_param_dim(); //在线学习时只更新超参数，诱导点位置不更新
+  /// STEP:calculate derivatives of basic matrices
+  int update_param_dim =
+      cf->get_param_dim(); //在线学习时只更新超参数，诱导点位置不更新
 
-    std::vector<Eigen::MatrixXd> K_RR_dot(update_param_dim - 1);
-    std::vector<Eigen::MatrixXd> K_RX_dot(update_param_dim - 1);
-    std::vector<Eigen::VectorXd> diagK_XX_dot(update_param_dim - 1);
-    for (size_t i = 0; i < update_param_dim - 1; i++) {
-      K_RR_dot[i] = Eigen::MatrixXd::Zero(m, m);
-      K_RX_dot[i] = Eigen::MatrixXd::Zero(m, b);
-      diagK_XX_dot[i] = Eigen::VectorXd::Zero(b);
-    }
-    Eigen::VectorXd g_hyper;
-    // K_RX_dot
-    for (size_t i = 0; i < m; i++) {
-      for (size_t j = 0; j < b; j++) {
-        g_hyper.setZero(update_param_dim);
-        cf->grad(batch_inputs[j], inducingset->x(i), g_hyper);
-        for (size_t p = 0; p < update_param_dim - 1; p++) {
-          K_RX_dot[p](i, j) = g_hyper(p);
-        }
-      }
-    }
-    // K_RR_dot
-    for (size_t i = 0; i < m; i++) {
-      for (size_t j = 0; j <= m; j++) {
-        g_hyper.setZero(update_param_dim);
-        cf->grad(inducingset->x(j), inducingset->x(i), g_hyper);
-        for (size_t p = 0; p < update_param_dim - 1; p++) {
-          K_RR_dot[p](i, j) = g_hyper(p);
-          if (j != i)
-            K_RR_dot[p](j, i) = g_hyper(p); // symmetry property
-        }
-      }
-    }
-    // diagK_XX_dot
-    for (size_t i = 0; i < b; i++) {
+  std::vector<Eigen::MatrixXd> K_RR_dot(noise_idx);
+  std::vector<Eigen::MatrixXd> K_RX_dot(noise_idx);
+  std::vector<Eigen::VectorXd> diagK_XX_dot(noise_idx);
+  for (size_t i = 0; i < noise_idx; i++) {
+    K_RR_dot[i] = Eigen::MatrixXd::Zero(m, m);
+    K_RX_dot[i] = Eigen::MatrixXd::Zero(m, b);
+    diagK_XX_dot[i] = Eigen::VectorXd::Zero(b);
+  }
+  Eigen::VectorXd g_hyper;
+  // K_RX_dot
+  for (size_t i = 0; i < m; i++) {
+    for (size_t j = 0; j < b; j++) {
       g_hyper.setZero(update_param_dim);
-      cf->grad(batch_inputs[i], batch_inputs[i], g_hyper);
-      for (size_t p = 0; p < update_param_dim - 1; p++) {
-        diagK_XX_dot[p](i) = g_hyper(p);
+      cf->grad(batch_inputs[j], inducingset->x(i), g_hyper);
+      for (size_t p = 0; p < noise_idx; p++) {
+        K_RX_dot[p](i, j) = g_hyper(p);
       }
     }
-
-    Eigen::MatrixXd H_dot;
-    Eigen::VectorXd r_dot;
-    Eigen::VectorXd V_dot;
-    Eigen::MatrixXd S_dot;
-    Eigen::VectorXd eta_dot_1;
-    Eigen::MatrixXd Lambda_dot_1;
-
-    //定义矩阵逐元素相乘后所有元素求和的函数
-    auto elementwise_sum = [](const Eigen::MatrixXd &mat,
-                              const Eigen::MatrixXd &other) {
-      return (mat.array() * other.array()).sum();
-    };
-    for (size_t p = 0; p < update_param_dim; p++) {
-      if (p == update_param_dim - 1) {
-        //专门处理噪声参数的梯度
-        continue;
+  }
+  // K_RR_dot
+  for (size_t i = 0; i < m; i++) {
+    for (size_t j = 0; j <= i; j++) {
+      g_hyper.setZero(update_param_dim);
+      cf->grad(inducingset->x(j), inducingset->x(i), g_hyper);
+      for (size_t p = 0; p < noise_idx; p++) {
+        K_RR_dot[p](i, j) = g_hyper(p);
+        if (j != i)
+          K_RR_dot[p](j, i) = g_hyper(p); // symmetry property
       }
-      /// STEP:calculate derivatives of intermediate matrices
-      H_dot = K_RX_dot[p].transpose() * iK_RR -
-              K_RX.transpose() * chol_solve(K_RR, K_RR_dot[p]) * iK_RR;
-
-      r_dot = -H_dot * iLambda_0 * eta_0 - H * iLambda_0 * eta_dot_0[p] +
-              H * chol_solve(Lambda_0, Lambda_dot_0[p]) * iLambda_0 * eta_0;
-
-      auto d_dot = diagK_XX_dot[p] - (H_dot * K_RX).diagonal() -
-                   (H * K_RX_dot[p]).diagonal();
-
-      V_dot = param_alpha * d_dot.asDiagonal();
-
-      S_dot = H_dot * iLambda_0 * H_T -
-              H * chol_solve(Lambda_0, Lambda_dot_0[p]) * iLambda_0 * H_T +
-              H * iLambda_0 * H_dot.transpose() + V_dot;
-
-      eta_dot_1 =
-          eta_dot_0[p] + H_dot.transpose() * inv_diag_V.asDiagonal() * y -
-          H_T * inv_diag_V.asDiagonal() * V_dot * inv_diag_V.asDiagonal() * y;
-
-      Lambda_dot_1 =
-          Lambda_dot_0[p] + H_dot.transpose() * inv_diag_V.asDiagonal() * H -
-          H_T * inv_diag_V.asDiagonal() * V_dot * inv_diag_V.asDiagonal() * H +
-          H_T * inv_diag_V.asDiagonal() * H_dot;
-
-      /// TODO: /// STEP:calculate block derivatives
-
-      /// STEP:calculate final gradients
-      elbo_dot_0[p] += 0.0;
+    }
+  }
+  // diagK_XX_dot
+  for (size_t i = 0; i < b; i++) {
+    g_hyper.setZero(update_param_dim);
+    cf->grad(batch_inputs[i], batch_inputs[i], g_hyper);
+    for (size_t p = 0; p < noise_idx; p++) {
+      diagK_XX_dot[p](i) = g_hyper(p);
     }
   }
 
-  /// STEP:update natural parameters
+  Eigen::MatrixXd H_dot;
+  Eigen::VectorXd r_dot;
+  Eigen::MatrixXd V_dot;
+  Eigen::MatrixXd S_dot;
+  Eigen::VectorXd eta_dot_1;
+  Eigen::MatrixXd Lambda_dot_1;
+
+  //定义矩阵逐元素相乘后所有元素求和的函数
+  auto elementwise_sum = [](const Eigen::MatrixXd &mat,
+                            const Eigen::MatrixXd &other) {
+    return (mat.array() * other.array()).sum();
+  };
+  for (size_t p = 0; p < update_param_dim; p++) {
+    if (p == update_param_dim - 1) {
+      //专门处理噪声参数的梯度
+      r_dot = H * chol_solve(Lambda_0, Lambda_dot_0[p]) * iLambda_0 * eta_0 -
+              H * iLambda_0 * eta_dot_0[p];
+      V_dot = Eigen::MatrixXd::Zero(b, b);
+      V_dot.diagonal().array() = 2 * noise_variance;
+      S_dot =
+          V_dot - H * chol_solve(Lambda_0, Lambda_dot_0[p]) * iLambda_0 * H_T;
+
+      eta_dot_1 = eta_dot_0[p] - H_T * inv_diag_V.asDiagonal() * V_dot *
+                                     inv_diag_V.asDiagonal() * y;
+
+      Lambda_dot_1 = Lambda_dot_0[p] - H_T * inv_diag_V.asDiagonal() * V_dot *
+                                           inv_diag_V.asDiagonal() * H;
+
+      double elbo_batch_dot = 0.0;
+      /// STEP:calculate block derivatives
+      //计算dpsi_dLambda_k
+      elbo_batch_dot += elementwise_sum(chol_inverse(Lambda_1), Lambda_dot_1);
+
+      //计算dpsi_dLambda_k-1
+      elbo_batch_dot += elementwise_sum(iLambda_0, Lambda_dot_0[p]);
+
+      //计算dpsi_drk
+      Eigen::VectorXd iS_r = iS * r;
+      elbo_batch_dot += r_dot.dot(2 * iS_r);
+
+      //计算dpsi_dS_k
+      elbo_batch_dot -= elementwise_sum(iS_r * iS_r.transpose(), S_dot);
+
+      //计算dpsi_dV_k
+      elbo_batch_dot += 1.0 / param_alpha * inv_diag_V.dot(V_dot.diagonal());
+
+      //正则项中的噪声相关项
+      elbo_batch_dot -=
+          2 * (1.0 - param_alpha) / param_alpha * static_cast<double>(b);
+
+      /// STEP:calculate final gradients
+      elbo_dot_0[p] -= 0.5 * elbo_batch_dot;
+
+      /// STEP:propagate gradients of natural parameters
+      eta_dot_0[p] = eta_dot_1;
+      Lambda_dot_0[p] = Lambda_dot_1;
+      continue;
+    }
+    /// STEP:calculate derivatives of intermediate matrices
+
+    H_dot = K_RX_dot[p].transpose() * iK_RR -
+            K_RX.transpose() * iK_RR * K_RR_dot[p] * iK_RR;
+
+    r_dot = -H_dot * iLambda_0 * eta_0 - H * iLambda_0 * eta_dot_0[p] +
+            H * iLambda_0 * Lambda_dot_0[p] * iLambda_0 * eta_0;
+
+    auto d_dot = diagK_XX_dot[p] - (H_dot * K_RX).diagonal() -
+                 (H * K_RX_dot[p]).diagonal();
+
+    V_dot = param_alpha * d_dot.asDiagonal();
+
+    S_dot = H_dot * iLambda_0 * H_T -
+            H * iLambda_0 * Lambda_dot_0[p] * iLambda_0 * H_T +
+            H * iLambda_0 * H_dot.transpose() + V_dot;
+
+    auto inv_V = inv_diag_V.asDiagonal();
+    eta_dot_1 = eta_dot_0[p] + H_dot.transpose() * inv_V * y -
+                H_T * inv_V * V_dot * inv_V * y;
+
+    Lambda_dot_1 = Lambda_dot_0[p] + H_dot.transpose() * inv_V * H -
+                   H_T * inv_V * V_dot * inv_V * H + H_T * inv_V * H_dot;
+
+    double elbo_batch_dot = 0.0;
+    /// STEP:calculate block derivatives
+    //计算dpsi_dLambda_k
+    elbo_batch_dot += elementwise_sum(chol_inverse(Lambda_1), Lambda_dot_1);
+
+    //计算dpsi_dLambda_k-1
+    elbo_batch_dot += elementwise_sum(iLambda_0, Lambda_dot_0[p]);
+
+    //计算dpsi_drk
+    Eigen::VectorXd iS_r = iS * r;
+    elbo_batch_dot += r_dot.dot(2 * iS_r);
+
+    //计算dpsi_dS_k
+    elbo_batch_dot -= elementwise_sum(iS_r * iS_r.transpose(), S_dot);
+
+    //计算dpsi_dV_k
+    elbo_batch_dot += 1 / param_alpha * inv_diag_V.dot(V_dot.diagonal());
+
+    /// STEP:calculate final gradients
+    elbo_dot_0[p] -= 0.5 * elbo_batch_dot;
+
+    /// STEP:propagate gradients of natural parameters
+    eta_dot_0[p] = eta_dot_1;
+    Lambda_dot_0[p] = Lambda_dot_1;
+  }
+
+  /// STEP:propagate natural parameters
   eta_0 = eta_1;
   Lambda_0 = Lambda_1;
 
