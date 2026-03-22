@@ -138,5 +138,5 @@ on Artificial Neural Networks*, Computational Intelligence and Learning.
   capability to read and write models to disk 
 
 * 2026/03/21 
-  在原库的基础上实现了稀疏变分高斯过程，与递归版本的稀疏变分高斯过程
+  在原库的基础上实现了稀疏变分高斯过程，递归版本的稀疏变分高斯过程
   用于船舶操纵性辨识
