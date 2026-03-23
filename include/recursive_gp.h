@@ -33,7 +33,8 @@ private:
   double beta1_;
   double beta2_;
   double epsilon_;
-
+  double tolerance_; // 新增：收敛判断阈值
+  
   int iteration_;
   Eigen::VectorXd m_; // 一阶矩估计
   Eigen::VectorXd v_; // 二阶矩估计
@@ -41,10 +42,11 @@ private:
 public:
   // 构造函数
   AdamOptimizer(int param_size, double learning_rate = 0.005,
-                double beta1 = 0.9, double beta2 = 0.999, double epsilon = 1e-3,
+                double beta1 = 0.9, double beta2 = 0.99, double epsilon = 1e-8,
+                double tolerance = 1e-5, // 新增：默认阈值可以设为 1e-5
                 int max_iterations = 1000)
       : learning_rate_(learning_rate), beta1_(beta1), beta2_(beta2),
-        epsilon_(epsilon), iteration_(0) {
+        epsilon_(epsilon), tolerance_(tolerance), iteration_(0) {
 
     // 初始化矩估计向量
     m_ = Eigen::VectorXd::Zero(param_size);
@@ -62,7 +64,7 @@ public:
   // gradient_func: 返回当前参数下的梯度向量
   // params: 当前参数值（会被原地更新）
   // 返回: 是否收敛
-  void step(const Eigen::VectorXd &grad, Eigen::VectorXd &params) {
+  bool step(const Eigen::VectorXd &grad, Eigen::VectorXd &params) {
     // check dimensions
     if (grad.size() != params.size()) {
       throw std::invalid_argument("Gradient and parameter size mismatch.");
@@ -86,6 +88,12 @@ public:
     // 更新参数
     params.array() +=
         learning_rate_ * m_hat.array() / (v_hat.array().sqrt() + epsilon_);
+
+    if (grad.cwiseAbs().maxCoeff() < tolerance_) {
+      return true;
+    }
+
+    return false;
   }
 
   // 获取当前迭代信息
@@ -123,15 +131,11 @@ public:
 
   Eigen::MatrixXd getFlatPosteriorCovMatrix() override;
 
-  Eigen::VectorXd get_hyperparameters() override;
-
-  void update_hyperparameters(const Eigen::VectorXd &params) override;
-
   void batchUpdate(const std::vector<Eigen::VectorXd> &batch_inputs,
                    const Eigen::VectorXd &batch_targets, bool hyperParam_opt,
                    bool inducing_opt);
 
-  void epochUpdate(bool verbose = true);
+  std::vector<double> epochUpdate(bool verbose = true);
 
   void setInducingTargetZeros();
 
@@ -159,7 +163,8 @@ protected:
   };
 
   inline auto chol_inverse(const Eigen::MatrixXd &A) -> Eigen::MatrixXd {
-    Eigen::MatrixXd L = chol_lower(A);
+    auto A_jitter = A + Eigen::MatrixXd::Identity(A.rows(), A.cols()) * 1e-6;
+    Eigen::MatrixXd L = chol_lower(A_jitter);
     Eigen::MatrixXd inv = Eigen::MatrixXd::Identity(L.rows(), L.cols());
     L.triangularView<Eigen::Lower>().solveInPlace(inv);
     L.adjoint().triangularView<Eigen::Upper>().solveInPlace(inv);

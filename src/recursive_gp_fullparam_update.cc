@@ -257,12 +257,11 @@ void RecursiveGaussianProcess::updatePosteriorWithHistoryInfo(bool grad_cal) {
   // 初始化 eta_dot_0, Lambda_dot_0, elbo_dot_0
 
   size_t hyperparam_dim = cf->get_param_dim(); // 不更新噪声参数
-  size_t new_inducing_start_idx = m_a;
-  size_t new_inducing_points_num = m - m_a;
-  size_t update_inducing_dim = (m - m_a) * input_dim;
+  size_t update_inducing_dim = m * input_dim;
 
   int variational_param_dim =
-      hyperparam_dim + m * input_dim; //在线学习时只更新超参数，诱导点位置不更新
+      hyperparam_dim +
+      update_inducing_dim; //在线学习时只更新超参数，诱导点位置不更新
 
   eta_dot_0.resize(variational_param_dim);
   Lambda_dot_0.resize(variational_param_dim);
@@ -404,45 +403,36 @@ void RecursiveGaussianProcess::updatePosteriorWithHistoryInfo(bool grad_cal) {
     K_ba_dot_inducing[i] = Eigen::MatrixXd::Zero(m, m_a);
   }
   // K_ba_dot for inducing points
-  for (size_t i = 0; i < new_inducing_points_num; i++) {
+  for (size_t i = 0; i < m; i++) {
     size_t param_id = i * input_dim;
-    size_t inducing_idx = new_inducing_start_idx + i;
     for (size_t j = 0; j < m_a; j++) {
       g_ind.setZero();
-      cf->grad_wrt_x1(inducingset->x(inducing_idx), inducingset_pre->x(j),
-                      g_ind);
+      cf->grad_wrt_x1(inducingset->x(i), inducingset_pre->x(j), g_ind);
       for (size_t p = 0; p < input_dim; p++) {
-        K_ba_dot_inducing[param_id + p](inducing_idx, j) = g_ind(p);
+        K_ba_dot_inducing[param_id + p](i, j) = g_ind(p);
       }
     }
   }
   // K_RR_dot for inducing points
-  for (size_t i = 0; i < new_inducing_points_num; i++) {
-    size_t inducing_idx_i = new_inducing_start_idx + i;
+  for (size_t i = 0; i < m; i++) {
     for (size_t j = 0; j < i; j++) {
-      size_t inducing_idx_j = new_inducing_start_idx + j;
       g_ind.setZero();
-      cf->grad_wrt_x1(inducingset->x(inducing_idx_i),
-                      inducingset->x(inducing_idx_j), g_ind);
+      cf->grad_wrt_x1(inducingset->x(i), inducingset->x(j), g_ind);
 
       size_t param_id_i = i * input_dim;
       size_t param_id_j = j * input_dim;
 
       for (size_t p = 0; p < input_dim; p++) {
-        K_bb_dot_inducing[param_id_i + p](inducing_idx_i, inducing_idx_j) =
-            g_ind(p);
-        K_bb_dot_inducing[param_id_i + p](inducing_idx_j, inducing_idx_i) =
-            g_ind(p);
-        K_bb_dot_inducing[param_id_j + p](inducing_idx_i, inducing_idx_j) =
-            -g_ind(p);
-        K_bb_dot_inducing[param_id_j + p](inducing_idx_j, inducing_idx_i) =
-            -g_ind(p);
+        K_bb_dot_inducing[param_id_i + p](i, j) = g_ind(p);
+        K_bb_dot_inducing[param_id_i + p](j, i) = g_ind(p);
+        K_bb_dot_inducing[param_id_j + p](i, j) = -g_ind(p);
+        K_bb_dot_inducing[param_id_j + p](j, i) = -g_ind(p);
       }
     }
   }
 
   for (size_t p = 0; p < update_inducing_dim; p++) {
-    size_t param_id = update_hyperParam_dim + m_a * input_dim + p;
+    size_t param_id = update_hyperParam_dim + p;
     Lambda_dot_0[param_id] = -inv_K_bb * K_bb_dot_inducing[p] * inv_K_bb;
     H_dot_0 = K_ba_dot_inducing[p].transpose() * inv_K_bb +
               K_ab * Lambda_dot_0[param_id];
@@ -510,17 +500,17 @@ void RecursiveGaussianProcess::storeOldPosterior() {
   old_posterior_need_store = false;
 }
 
-std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
+void RecursiveGaussianProcess::epochUpdate(bool verbose) {
   if (inducingset->empty()) {
     std::cerr
         << "Error: inducing set is empty! Please Specify inducing points first!"
         << std::endl;
-    return {};
+    return;
   }
   if (sampleset->empty()) {
     std::cerr << "Error: sample set is empty! Please add training data first!"
               << std::endl;
-    return {};
+    return;
   }
 
   old_posterior_need_store = true;
@@ -557,7 +547,7 @@ std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
   }
 
   size_t max_batches = (n + batch_size - 1) / batch_size;
-  std::vector<double> epoch_lml;
+
   for (size_t epoch = 0; epoch < 50; epoch++) {
     std::cout << "Epoch: " << epoch << std::endl;
     recursive_initialized = false;
@@ -587,16 +577,9 @@ std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
 
       Eigen::VectorXd params = get_hyperparameters();
 
-      bool converged = adam_optimizer->step(elbo_dot_0, params);
-      update_hyperparameters(params);
-      epoch_lml.push_back(elbo_0);
-      if (converged) {
-        std::cout << "Optimization converged at iteration "
-                  << adam_optimizer->get_iteration() << std::endl;
-        break; // 提前退出 Epoch 循环
-      }
+      adam_optimizer->step(elbo_dot_0, params);
+      // update_hyperparameters(params);
     }
-    adam_optimizer->set_learning_rate_decay(0.9, 50);
   }
 
   Eigen::VectorXd mean_inducing = chol_solve(Lambda_0, eta_0);
@@ -606,8 +589,6 @@ std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
   cov_inducing = chol_inverse(Lambda_0);
 
   cf->loghyper_changed = true;
-
-  return epoch_lml;
 }
 
 void RecursiveGaussianProcess::batchUpdate(
@@ -734,9 +715,7 @@ void RecursiveGaussianProcess::batchUpdate(
   }
 
   //处理诱导点相关的梯度(只更新新的诱导点位置的梯度，历史诱导点位置的梯度为零)
-  size_t new_inducing_start_idx = inducingset_pre->size();
-  size_t new_inducing_points_num = m - new_inducing_start_idx;
-  size_t update_inducing_dim = (m - new_inducing_start_idx) * input_dim;
+  size_t update_inducing_dim = m * input_dim;
   std::vector<Eigen::MatrixXd> K_RR_dot_inducing(update_inducing_dim);
   std::vector<Eigen::MatrixXd> K_RX_dot_inducing(update_inducing_dim);
   for (size_t i = 0; i < update_inducing_dim; i++) {
@@ -745,38 +724,30 @@ void RecursiveGaussianProcess::batchUpdate(
   }
   Eigen::VectorXd g_ind(input_dim);
   // K_RX_dot for inducing points
-  for (size_t i = 0; i < new_inducing_points_num; i++) {
+  for (size_t i = 0; i < m; i++) {
     size_t param_id = i * input_dim;
-    size_t inducing_idx = new_inducing_start_idx + i;
     for (size_t j = 0; j < b; j++) {
       g_ind.setZero();
-      cf->grad_wrt_x1(inducingset->x(inducing_idx), batchSet->x(j), g_ind);
+      cf->grad_wrt_x1(inducingset->x(i), batchSet->x(j), g_ind);
       for (size_t p = 0; p < input_dim; p++) {
-        K_RX_dot_inducing[param_id + p](inducing_idx, j) = g_ind(p);
+        K_RX_dot_inducing[param_id + p](i, j) = g_ind(p);
       }
     }
   }
   // K_RR_dot for inducing points
-  for (size_t i = 0; i < new_inducing_points_num; i++) {
-    size_t inducing_idx_i = new_inducing_start_idx + i;
+  for (size_t i = 0; i < m; i++) {
     for (size_t j = 0; j < i; j++) {
-      size_t inducing_idx_j = new_inducing_start_idx + j;
       g_ind.setZero();
-      cf->grad_wrt_x1(inducingset->x(inducing_idx_i),
-                      inducingset->x(inducing_idx_j), g_ind);
+      cf->grad_wrt_x1(inducingset->x(i), inducingset->x(j), g_ind);
 
       size_t param_id_i = i * input_dim;
       size_t param_id_j = j * input_dim;
 
       for (size_t p = 0; p < input_dim; p++) {
-        K_RR_dot_inducing[param_id_i + p](inducing_idx_i, inducing_idx_j) =
-            g_ind(p);
-        K_RR_dot_inducing[param_id_i + p](inducing_idx_j, inducing_idx_i) =
-            g_ind(p);
-        K_RR_dot_inducing[param_id_j + p](inducing_idx_i, inducing_idx_j) =
-            -g_ind(p);
-        K_RR_dot_inducing[param_id_j + p](inducing_idx_j, inducing_idx_i) =
-            -g_ind(p);
+        K_RR_dot_inducing[param_id_i + p](i, j) = g_ind(p);
+        K_RR_dot_inducing[param_id_i + p](j, i) = g_ind(p);
+        K_RR_dot_inducing[param_id_j + p](i, j) = -g_ind(p);
+        K_RR_dot_inducing[param_id_j + p](j, i) = -g_ind(p);
       }
     }
   }
@@ -893,7 +864,7 @@ void RecursiveGaussianProcess::batchUpdate(
   //处理诱导点相关的梯度
   for (size_t p = 0; p < update_inducing_dim; p++) {
     size_t param_id =
-        update_hyperParam_dim + new_inducing_start_idx * input_dim + p;
+        update_hyperParam_dim + p;
     /// STEP:calculate derivatives of intermediate matrices
     H_dot = K_RX_dot_inducing[p].transpose() * iK_RR -
             K_RX.transpose() * iK_RR * K_RR_dot_inducing[p] * iK_RR;
