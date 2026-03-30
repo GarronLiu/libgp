@@ -132,7 +132,7 @@ public:
   Eigen::MatrixXd getFlatPosteriorCovMatrix() override;
 
   void batchUpdate(const std::vector<Eigen::VectorXd> &batch_inputs,
-                   const Eigen::VectorXd &batch_targets, bool hyperParam_opt,
+                   const Eigen::VectorXd &batch_targets, bool hyper_opt,
                    bool inducing_opt);
 
   std::vector<double> epochUpdate(bool verbose = true);
@@ -212,7 +212,7 @@ protected:
 
   void storeOldPosterior();
 
-  void updatePosteriorWithHistoryInfo(bool grad_cal);
+  void updatePosteriorWithHistoryInfo(bool hyper_grad, bool inducing_grad);
 
   void deleteRedundantInducingPoints();
 };

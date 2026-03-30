@@ -99,10 +99,10 @@ public:
 
   void pred_diag(Eigen::VectorXd &mean_pred, Eigen::VectorXd &var_pred);
 
-  void pred_diag_derivative(Eigen::VectorXd &mean_deriv);
+  virtual void pred_diag_derivative(Eigen::VectorXd &mean_deriv);
 
-  void pred_diag_derivative(const std::vector<Eigen::VectorXd> &testset,
-                                Eigen::VectorXd &mean_deriv);
+  virtual void pred_diag_derivative(const std::vector<Eigen::VectorXd> &testset,
+                                     Eigen::VectorXd &mean_deriv);
 
   void validation(const std::shared_ptr<SampleSet> testset, double &mae,
                   double &rmse, double &lml);

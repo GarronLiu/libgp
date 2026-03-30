@@ -24,7 +24,7 @@ static std::mt19937 rng(rd());
 DE::DE() : lml_(0), duration_(0), 
            population_size_(50),    // DE 通常不需要像 GA 那么大的种群
            crossover_rate_(0.9),    // CR 通常较大
-           differential_weight_(0.8) // F 通常在 [0.5, 1.0] 之间
+           differential_weight_(0.5) // F 通常在 [0.5, 1.0] 之间
 {
 }
 
@@ -74,6 +74,10 @@ void DE::maximize(GaussianProcess* gp, size_t max_generations, bool verbose)
     for (size_t gen = 0; gen < max_generations; ++gen) {
         auto iter_start = std::chrono::high_resolution_clock::now();
         lml_history_.push_back(best_fitness);
+        
+        // 备份当前参数，避免在评估过程中破坏其他可能的状态
+        Eigen::VectorXd gp_backup = gp->get_hyperparameters();
+
         for (size_t i = 0; i < population_size_; ++i) {
             // A. 变异与交叉 (Mutation & Crossover) -> 生成试验向量 u_i
             Eigen::VectorXd trial_genes = create_trial_vector(i, param_dim);
@@ -82,10 +86,15 @@ void DE::maximize(GaussianProcess* gp, size_t max_generations, bool verbose)
             for (int k = 0; k < param_dim; ++k) {
                 trial_genes(k) = std::max(lb(k), std::min(trial_genes(k), ub(k)));
             }
+            
+            // 确保噪声具有合理的下界 (防止核矩阵奇异)，通常噪声是最后一个参数
+            int noise_idx = param_dim - 1;
+            double min_log_noise = -10.0; // 约等于 4.5e-5 在实数域
+            if (trial_genes(noise_idx) < min_log_noise) {
+                trial_genes(noise_idx) = min_log_noise;
+            }
 
             // C. 选择 (Selection) -> 贪婪策略
-            // 只有当试验个体的适应度优于目标个体时，才替换
-            
             // 临时更新 GP 参数以评估试验个体
             gp->update_hyperparameters(trial_genes);
             double trial_fitness = gp->log_likelihood();
@@ -93,6 +102,9 @@ void DE::maximize(GaussianProcess* gp, size_t max_generations, bool verbose)
             if (std::isnan(trial_fitness) || std::isinf(trial_fitness)) {
                 trial_fitness = -1e9;
             }
+
+            // 评估后立即恢复，防止错误累积传递
+            gp->update_hyperparameters(gp_backup);
 
             // 如果试验个体更好，则替换当前个体
             if (trial_fitness > population_[i].fitness) {
@@ -136,8 +148,8 @@ void DE::initialize_population(size_t pop_size, int param_dim, const Eigen::Vect
     population_.clear();
     population_.resize(pop_size);
     
-    // 使用较宽的初始化范围，帮助跳出局部最优
-    std::normal_distribution<double> distribution(0.0, 1.0); 
+    // 使用范围初始化，如果边界过大(无限)就限制在 [-10, 10] 之类的区间
+    std::uniform_real_distribution<double> unif01(0.0, 1.0);
 
     // 第一个个体保留原始参数
     population_[0].genes = initial_params;
@@ -147,11 +159,14 @@ void DE::initialize_population(size_t pop_size, int param_dim, const Eigen::Vect
     population_[0].fitness = -1e9;
 
     for (size_t i = 1; i < pop_size; ++i) {
-        population_[i].genes = initial_params;
+        population_[i].genes = Eigen::VectorXd(param_dim);
         for (int j = 0; j < param_dim; ++j) {
-            // 随机扰动并截断
-            double val = population_[i].genes(j) + distribution(rng);
-            population_[i].genes(j) = std::max(lb(j), std::min(val, ub(j)));
+            // 安全的边界决定
+            double safe_lb = std::max(lb(j), -10.0);
+            double safe_ub = std::min(ub(j), 10.0);
+            
+            // 采用基于边界的均匀采样
+            population_[i].genes(j) = safe_lb + unif01(rng) * (safe_ub - safe_lb);
         }
         population_[i].fitness = -1e9;
     }

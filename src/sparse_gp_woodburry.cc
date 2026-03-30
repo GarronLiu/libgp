@@ -2,8 +2,8 @@
 // Copyright (c) 2013, Manuel Blum <mblum@informatik.uni-freiburg.de>
 // All rights reserved.
 
-#include "sparse_gp.h"
 #include "cov_factory.h"
+#include "sparse_gp.h"
 
 #include <cmath>
 #include <ctime>
@@ -200,7 +200,7 @@ double SparseGaussianProcess::var(const double x[]) {
   Eigen::Map<const Eigen::VectorXd> x_star(x, input_dim);
   compute();
   update_k_star(x_star);
-  double output = cf->get(x_star, x_star)  - k_star.dot(Q_pred * k_star);
+  double output = cf->get(x_star, x_star) - k_star.dot(Q_pred * k_star);
   if (output < 0.0) {
     // Numerical round-off can produce tiny negative variances; clamp to zero.
     if (output > -1e-12)
@@ -214,13 +214,45 @@ double SparseGaussianProcess::var(const double x[]) {
   return output;
 }
 
+void SparseGaussianProcess::pred_diag_derivative(Eigen::VectorXd &mean_deriv) {
+  if (input_dim > 1) {
+    std::cerr << "Error: pred_diag_derivative now only supports 1D input."
+              << std::endl;
+    return;
+  }
+  Eigen::VectorXd mean_deriv_temp;
+  mean_deriv.resize(sampleset->size());
+  mean_deriv.setZero();
+  for (size_t i = 0; i < sampleset->size(); ++i) {
+    for (size_t j = 0; j < inducingset->size(); ++j) {
+      cf->grad_wrt_x1(sampleset->x(i), inducingset->x(j), mean_deriv_temp);
+      mean_deriv(i) += mean_deriv_temp(0) * alpha_R(j);
+    }
+  }
+}
+
+void SparseGaussianProcess::pred_diag_derivative(
+    const std::vector<Eigen::VectorXd> &testset, Eigen::VectorXd &mean_deriv) {
+  size_t N = testset.size();
+  mean_deriv.resize(N);
+  mean_deriv.setZero();
+  Eigen::VectorXd mean_deriv_temp;
+  for (size_t i = 0; i < testset.size(); ++i) {
+    Eigen::VectorXd x_star = testset[i];
+    for (size_t j = 0; j < inducingset->size(); ++j) {
+      cf->grad_wrt_x1(x_star, inducingset->x(j), mean_deriv_temp);
+      mean_deriv(i) += mean_deriv_temp(0) * alpha_R(j);
+    }
+  }
+}
+
 void SparseGaussianProcess::compute() {
   if (!cf->loghyper_changed && !alpha_needs_update)
     return;
   cf->loghyper_changed = false;
   size_t m = inducingset->size();
   size_t n = sampleset->size();
-  
+
   // calculate Kernel matrix K_RX from inducing set
   Eigen::MatrixXd K_RX, K_RR;
   K_RX.resize(m, n);
@@ -235,7 +267,7 @@ void SparseGaussianProcess::compute() {
       std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
 
   K_RR.diagonal().array() -= noise_variance; // subtract noise variance
-  K_RR.diagonal().array() += 1e-6; // jitter for numerical stability
+  K_RR.diagonal().array() += 1e-6;           // jitter for numerical stability
   L_K_RR = K_RR.selfadjointView<Eigen::Lower>().llt().matrixL();
 
   // Calculate covariance matrix of inducing set \Sigma_u = K_{uu} - v^double v
@@ -246,7 +278,7 @@ void SparseGaussianProcess::compute() {
   Eigen::VectorXd Q_ff_diag = U.colwise().squaredNorm();
 
   Eigen::VectorXd K_XX_diag(n);
-  for(size_t i=0; i<n; ++i){
+  for (size_t i = 0; i < n; ++i) {
     K_XX_diag(i) = cf->get(sampleset->x(i), sampleset->x(i)) - noise_variance;
   }
   K_XX_diag.array() += 1e-6; // jitter for numerical stability
@@ -260,14 +292,15 @@ void SparseGaussianProcess::compute() {
 
   // U_scaled = U * diag(inv_lambda)
   Eigen::MatrixXd U_scaled = U;
-  for(size_t i=0; i<n; ++i) U_scaled.col(i) *= inv_lambda(i);
+  for (size_t i = 0; i < n; ++i)
+    U_scaled.col(i) *= inv_lambda(i);
 
   Eigen::MatrixXd B = Eigen::MatrixXd::Identity(m, m);
   // B = I + U_scaled * U^T -> O(M^2 * N)
   B.noalias() += U_scaled * U.transpose();
 
-  L_B.resize(m,m);
-  L_B = B.llt().matrixL(); 
+  L_B.resize(m, m);
+  L_B = B.llt().matrixL();
 
   const std::vector<double> &targets = sampleset->y();
   Eigen::Map<const Eigen::VectorXd> y(&targets[0], n);
@@ -281,15 +314,18 @@ void SparseGaussianProcess::compute() {
   // alpha = Lambda^{-1} y - Lambda^{-1} U^T B^{-1} U Lambda^{-1} y
   //       = y_tilde - Lambda^{-1} U^T z
   alpha.resize(n);
-  alpha = y_tilde - (U.transpose() * v).cwiseProduct(inv_lambda); // Lambda^{-1} * y - H^T * B^{-1} * H * Lambda^{-1} * y
+  alpha =
+      y_tilde - (U.transpose() * v)
+                    .cwiseProduct(inv_lambda); // Lambda^{-1} * y - H^T * B^{-1}
+                                               // * H * Lambda^{-1} * y
 
   Eigen::VectorXd temp = U * alpha;
   alpha_R.resize(m);
   alpha_R = L_K_RR.triangularView<Eigen::Lower>().adjoint().solve(temp);
-  
+
   // compute the posterior mean of inducing points
   K_RR = K_RR.selfadjointView<Eigen::Lower>();
-  Eigen::VectorXd mean_u = K_RR * alpha_R; 
+  Eigen::VectorXd mean_u = K_RR * alpha_R;
   for (size_t i = 0; i < m; ++i) {
     inducingset->set_y(i, mean_u(i));
   }
@@ -300,12 +336,12 @@ void SparseGaussianProcess::compute() {
   Eigen::MatrixXd B_inv = I_M;
   L_B.triangularView<Eigen::Lower>().solveInPlace(B_inv);
   L_B.triangularView<Eigen::Lower>().adjoint().solveInPlace(B_inv);
-  
+
   Eigen::MatrixXd M_mid = I_M - B_inv; // M x M 对称矩阵
 
   // 计算 L^{-1}
   Eigen::MatrixXd L_inv = I_M;
-  L_K_RR.triangularView<Eigen::Lower>().solveInPlace(L_inv); 
+  L_K_RR.triangularView<Eigen::Lower>().solveInPlace(L_inv);
 
   // 组合： Q = L^{-T} * M_mid * L^{-1}
   // Q = (L^{-1})^T * M_mid * L^{-1}
@@ -362,7 +398,7 @@ void SparseGaussianProcess::specify_inducingSet(
   } else if (m_clusters > 0) {
     // Use K-means clustering to select inducing points
     size_t inducingSet_size =
-      std::min(m_clusters, static_cast<size_t>(sampleset->size()));
+        std::min(m_clusters, static_cast<size_t>(sampleset->size()));
     inducingset = new SampleSet(input_dim);
 
     // Initialize centroids randomly from the dataset
@@ -381,40 +417,40 @@ void SparseGaussianProcess::specify_inducingSet(
       bool changed = false;
       std::vector<int> counts(inducingSet_size, 0);
       std::vector<Eigen::VectorXd> new_centroids(
-        inducingSet_size, Eigen::VectorXd::Zero(input_dim));
+          inducingSet_size, Eigen::VectorXd::Zero(input_dim));
 
       // Assignment step
       for (size_t i = 0; i < sampleset->size(); ++i) {
-      double min_dist = 0.1;
-      int best_cluster = 0;
-      for (size_t j = 0; j < inducingSet_size; ++j) {
-        double dist = (sampleset->x(i) - centroids[j]).squaredNorm();
-        if (dist < min_dist) {
-        min_dist = dist;
-        best_cluster = j;
+        double min_dist = 0.1;
+        int best_cluster = 0;
+        for (size_t j = 0; j < inducingSet_size; ++j) {
+          double dist = (sampleset->x(i) - centroids[j]).squaredNorm();
+          if (dist < min_dist) {
+            min_dist = dist;
+            best_cluster = j;
+          }
         }
-      }
-      if (labels[i] != best_cluster) {
-        labels[i] = best_cluster;
-        changed = true;
-      }
-      new_centroids[best_cluster] += sampleset->x(i);
-      counts[best_cluster]++;
+        if (labels[i] != best_cluster) {
+          labels[i] = best_cluster;
+          changed = true;
+        }
+        new_centroids[best_cluster] += sampleset->x(i);
+        counts[best_cluster]++;
       }
 
       // Update step
       for (size_t j = 0; j < inducingSet_size; ++j) {
-      if (counts[j] > 0) {
-        centroids[j] = new_centroids[j] / counts[j];
-      } else {
-        // Re-initialize empty cluster randomly
-        int index = distribution(generator);
-        centroids[j] = sampleset->x(index);
-      }
+        if (counts[j] > 0) {
+          centroids[j] = new_centroids[j] / counts[j];
+        } else {
+          // Re-initialize empty cluster randomly
+          int index = distribution(generator);
+          centroids[j] = sampleset->x(index);
+        }
       }
 
       if (!changed)
-      break;
+        break;
     }
 
     // Add centroids to inducing set
@@ -422,7 +458,7 @@ void SparseGaussianProcess::specify_inducingSet(
       inducingset->add(centroid.data(), 0);
     }
     std::cout << "initialize " << inducingSet_size
-          << " inducing points using K-means clustering" << std::endl;
+              << " inducing points using K-means clustering" << std::endl;
   }
   alpha_needs_update = true;
 }
@@ -444,11 +480,13 @@ double SparseGaussianProcess::log_likelihood() {
 
   // 3. Regularizer (Power EP term)
   double regularizer_term = 0.0;
-  double noise_variance = std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
+  double noise_variance =
+      std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
 
   if (std::abs(param_alpha - 1.0) > 1e-6) {
-      Eigen::VectorXd ratio = lambda.array() / noise_variance;
-      regularizer_term = 0.5 * (1 - param_alpha) / param_alpha * ratio.array().log().sum();
+    Eigen::VectorXd ratio = lambda.array() / noise_variance;
+    regularizer_term =
+        0.5 * (1 - param_alpha) / param_alpha * ratio.array().log().sum();
   }
 
   return data_fit - 0.5 * log_det_K - 0.5 * n * log2pi - regularizer_term;
@@ -468,8 +506,8 @@ Eigen::VectorXd SparseGaussianProcess::log_likelihood_gradient() {
   // K_XX_bar^(-1) = Lambda^{-1} - Lambda^{-1} * U^T * B^{-1} * U * Lambda^{-1}
   Eigen::VectorXd inv_lambda = lambda.cwiseInverse();
   Eigen::MatrixXd U_scaled = U;
-  for(size_t i=0; i<n; ++i) {
-      U_scaled.col(i) *= inv_lambda(i);
+  for (size_t i = 0; i < n; ++i) {
+    U_scaled.col(i) *= inv_lambda(i);
   }
 
   Eigen::MatrixXd Y = L_B.triangularView<Eigen::Lower>().solve(U_scaled);
@@ -481,9 +519,11 @@ Eigen::VectorXd SparseGaussianProcess::log_likelihood_gradient() {
 
   double noise_variance =
       std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
-  Eigen::MatrixXd Diag_sigmaNoise_alphaDx_Inv = inv_lambda.asDiagonal().toDenseMatrix();
+  Eigen::MatrixXd Diag_sigmaNoise_alphaDx_Inv =
+      inv_lambda.asDiagonal().toDenseMatrix();
 
-  Eigen::MatrixXd H_T = L_K_RR.triangularView<Eigen::Lower>().adjoint().solve(U);
+  Eigen::MatrixXd H_T =
+      L_K_RR.triangularView<Eigen::Lower>().adjoint().solve(U);
   Eigen::MatrixXd H = H_T.transpose();
 
   Eigen::MatrixXd G_RX, G_RR;
@@ -592,8 +632,7 @@ void SparseGaussianProcess::update_variational_parameters(
   }
   inducingset->clear();
   for (size_t i = 0; i < inducingset->size(); ++i) {
-    Eigen::VectorXd x =
-        params.segment(i * input_dim, input_dim);
+    Eigen::VectorXd x = params.segment(i * input_dim, input_dim);
     inducingset->add(x, 0.0);
   }
   alpha_needs_update = true;

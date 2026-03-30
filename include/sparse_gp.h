@@ -43,6 +43,11 @@ public:
 
   double var(const double x[]) override;
 
+  void pred_diag_derivative(Eigen::VectorXd &mean_deriv) override;
+
+  void pred_diag_derivative(const std::vector<Eigen::VectorXd> &testset,
+                            Eigen::VectorXd &mean_deriv) override;
+
   /** Add input-output-pair to sample set.
    *  Add a copy of the given input-output-pair to sample set.
    *  @param x input array
@@ -60,7 +65,7 @@ public:
 
   void update_hyperparameters(const Eigen::VectorXd &params) override;
 
-  //update inducing points
+  // update inducing points
   void update_variational_parameters(const Eigen::VectorXd &params);
 
   Eigen::VectorXd get_hyperparameters() override;
@@ -69,7 +74,7 @@ public:
 
   Eigen::VectorXd get_hyperparameter_upper_bound() override;
 
-  //get inducing points
+  // get inducing points
   Eigen::VectorXd get_variational_parameters();
 
   SampleSet *get_inducingSet() { return inducingset; }
@@ -87,11 +92,12 @@ public:
   void exportModelToYAML(const char *filename);
 
 protected:
-  using GaussianProcess::alpha; //  alpha = (K_XX_bar + \sigma_n^2 I)^-1 * y
-  using GaussianProcess::L;     // Cholesky of (K_XX_bar + \sigma_n^2 I)
+  Eigen::VectorXd alpha_R;
+  using GaussianProcess::L; // Cholesky of (K_XX_bar + \sigma_n^2 I)
 
+  using GaussianProcess::alpha;  //  alpha = (K_XX_bar + \sigma_n^2 I)^-1 * y
+                                 // K_RR^-1 * u
   using GaussianProcess::k_star; // f_star = k_star * alpha_R
-  Eigen::VectorXd alpha_R;       // K_RR^-1 * u
   Eigen::MatrixXd
       L_R; // var_star = k_star_star - k_star^T * L_R^-T * L_R^-1 * k_star
 
@@ -106,19 +112,21 @@ protected:
       L_K_RR; // cholesky(K_RR)
 
   // Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>
-  //     H_T; 
+  //     H_T;
   // Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>
   //     D_X; // K_XX - K_XR * K_RR^-1 * K_RX
-  
+
   Eigen::VectorXd lambda;
 
-  Eigen::MatrixXd L_B; //cholesky(woodburry identity的中间矩阵: B = I + H * Lambda^{-1} * H^T)
+  Eigen::MatrixXd L_B; // cholesky(woodburry identity的中间矩阵: B = I + H *
+                       // Lambda^{-1} * H^T)
 
   Eigen::MatrixXd Q_pred;
 
   Eigen::MatrixXd cov_inducing;
 
-  Eigen::MatrixXd U; // U = L_K_RR^{-1} * K_RX; U^T * U = K_XR * K_RR^(-1) * K_RX
+  Eigen::MatrixXd
+      U; // U = L_K_RR^{-1} * K_RX; U^T * U = K_XR * K_RR^(-1) * K_RX
 
   void update_k_star(const Eigen::VectorXd &x_star) override;
 

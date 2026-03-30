@@ -354,7 +354,7 @@ class ParamEstimator {
 public:
   ParamEstimator(NonlinearSystem *nl_system) : nl_system_(nl_system) {
     state_dim_ = nl_system_->getStateDim();
-    // Initialize RK4 for prediction/visualization
+    // Initialize RK4 for train_file_namtion/visualization
     rk4_simulator_.reset(*nl_system_);
   }
   virtual ~ParamEstimator() = default;
@@ -407,7 +407,7 @@ public:
       return;
     }
     if (state_pred_history_.empty()) {
-      std::cerr << "No prediction history available. Run estimate() first."
+      std::cerr << "No train_file_namtion history available. Run estimate() first."
                 << std::endl;
       return;
     }
@@ -450,7 +450,7 @@ public:
     if (!state_test_data_.empty()) {
       std::cout << "Visualizing state fitting results on test set..."
                 << std::endl;
-      // Generate prediction history on test set
+      // Generate train_file_namtion history on test set
       size_t N_test = state_test_data_.size();
       for (size_t i = 0; i < state_dim_; ++i) {
         std::vector<double> x_true_i(N_test), x_est_i(N_test), t_vec(N_test);
@@ -601,7 +601,7 @@ protected:
           "Control test and time test data size mismatch.");
   }
 
-  void generatePredictionHistory() {
+  void generatetrain_file_namtionHistory() {
     state_pred_history_.clear();
 
     Eigen::VectorXd flat_params = nl_system_->getFlatParameters();
@@ -744,12 +744,12 @@ public:
       }
     }
 
-    // Update system and generate prediction history for visualization
+    // Update system and generate train_file_namtion history for visualization
     nl_system_->setParameters(current_params);
     param_history_.clear();
     for (size_t k = 0; k < N_data; ++k)
       param_history_.push_back(nl_system_->getFlatParameters());
-    generatePredictionHistory();
+    generatetrain_file_namtionHistory();
   }
 
 private:
@@ -845,7 +845,7 @@ public:
     }
 
     updateSystemParameters();
-    generatePredictionHistory();
+    generatetrain_file_namtionHistory();
     std::cout << "UKF Estimation Complete." << std::endl;
   }
 
@@ -913,7 +913,7 @@ private:
       sigma_points.col(i + 1 + aug_dim_) = x_aug_ - gamma * L.col(i);
     }
 
-    // 2. Prediction
+    // 2. train_file_namtion
     Eigen::MatrixXd sigma_pred = sigma_points;
     for (int i = 0; i < 2 * aug_dim_ + 1; ++i) {
       Eigen::VectorXd state_curr = sigma_points.col(i).head(state_dim_);
@@ -1052,7 +1052,7 @@ public:
         double dx_bwd = state_data_[j](i) - state_data_[j - 1](i);
         derivatives(j - 1) = (dx_fwd / dt_fwd + dx_bwd / dt_bwd) / 2.0;
       }
-      // GP smoothed derivative prediction
+      // GP smoothed derivative train_file_namtion
       gp_smoother_->pred_diag_derivative(gp_smoothed_derivatives[i]);
 
       // plot gp smoothed derivative vs numerical derivative
@@ -1208,7 +1208,7 @@ public:
     nl_system_->updateStructure(candidate_basis, updated_params);
     rk4_simulator_.reset(*nl_system_);
     std::cout << "Sparse GP Estimation Complete." << std::endl;
-    generatePredictionHistory();
+    generatetrain_file_namtionHistory();
   };
 
 private:
