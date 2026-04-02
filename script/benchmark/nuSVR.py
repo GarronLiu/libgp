@@ -170,10 +170,16 @@ def main():
 
     # 采用 NuSVR: nu 参数即可预先决定支持向量的比例 (0 < nu <= 1)。这里设置 nu=0.5 意味着大约有 50% 的训练样本会成为支持向量。
     print("Training Support Vector Machine (NuSVR)...")
-    svr = NuSVR(nu=0.5, C=1.0, kernel='rbf') 
+    nu = min(50 / len(X_U_scaled), 1.0)  # Limit to 50 support vectors
+    svr = NuSVR(nu=0.2, C=1.0, kernel='rbf')
     model = MultiOutputRegressor(svr)
     model.fit(X_U_scaled, X_dyn_dot)
     print("Training finished.")
+
+    # 查看支持向量数量
+    print(f"Number of estimators: {len(model.estimators_)}")
+    for i, estimator in enumerate(model.estimators_):
+        print(f"Estimator {i}: {len(estimator.support_vectors_)} support vectors")
 
     # 预测 (包含运动学积分)
     X_full_pred = np.zeros_like(X_full)
@@ -239,9 +245,9 @@ def main():
         np.column_stack((time, X_full_pred, U)),
         columns=['time', 'state_0', 'state_1', 'state_2', 'state_3', 'state_4', 'state_5', 'control_0', 'control_1']
     )
-    export_path = os.path.join(parser.parse_args().export_dir, f"{parser.parse_args().model_name}_{parser.parse_args().experiment_name}_KPM_TrainingSet_prediction.csv")
+    export_path = os.path.join(parser.parse_args().export_dir, f"{parser.parse_args().model_name}_{parser.parse_args().experiment_name}_nuSVR_TrainingSet_prediction.csv")
     df_pred.to_csv(export_path, index=False)
-    print(f"Koopman predictions saved to {export_path}")
+    print(f"nuSVR predictions saved to {export_path}")
 
     # 在测试集验证
     if parser.parse_args().test_file:

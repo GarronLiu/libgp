@@ -88,9 +88,9 @@ def main():
         outliers = (df_temp - rolling_median).abs() > threshold
         return df_temp.mask(outliers).interpolate(method='linear').bfill().ffill().values
 
-    # X_kin = remove_outliers(X_kin)
-    # X_dyn = remove_outliers(X_dyn)
-    # U = remove_outliers(U)
+    X_kin = remove_outliers(X_kin)
+    X_dyn = remove_outliers(X_dyn)
+    U = remove_outliers(U)
     # 平滑时历曲线 (使用移动平均滤波)
     window_size = 5
     X_kin = pd.DataFrame(X_kin).rolling(window=window_size, min_periods=1).mean().values
@@ -146,7 +146,7 @@ def main():
         plt.show()
 
     # 构建 Koopman
-    poly = PolynomialFeatures(degree=2, include_bias=True)  # degree 降为2更稳 degree越高，越有可能导致开环积分无穷大
+    poly = PolynomialFeatures(degree=3, include_bias=True)  # degree 降为2更稳 degree越高，越有可能导致开环积分无穷大
     
     # Check for NaNs or Infs one more time before scaler
     mask2 = ~np.isnan(X_dyn).any(axis=1) & ~np.isinf(X_dyn).any(axis=1) & ~np.isnan(X_dyn_dot).any(axis=1) & ~np.isinf(X_dyn_dot).any(axis=1)

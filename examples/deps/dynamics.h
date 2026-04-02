@@ -463,17 +463,17 @@ public:
     };
 
     double var_u =
-        (dt * dt / 36.0) *
-        (fast_var(cache_sgp_u_, z1) + 4 * fast_var(cache_sgp_u_, z2) +
-         4 * fast_var(cache_sgp_u_, z3) + fast_var(cache_sgp_u_, z4));
+        (dt * dt / 6.0) *
+        (fast_var(cache_sgp_u_, z1) + 2 * fast_var(cache_sgp_u_, z2) +
+         2 * fast_var(cache_sgp_u_, z3) + fast_var(cache_sgp_u_, z4));
     double var_v =
-        (dt * dt / 36.0) *
-        (fast_var(cache_sgp_v_, z1) + 4 * fast_var(cache_sgp_v_, z2) +
-         4 * fast_var(cache_sgp_v_, z3) + fast_var(cache_sgp_v_, z4));
+        (dt * dt / 6.0) *
+        (fast_var(cache_sgp_v_, z1) + 2 * fast_var(cache_sgp_v_, z2) +
+         2 * fast_var(cache_sgp_v_, z3) + fast_var(cache_sgp_v_, z4));
     double var_r =
-        (dt * dt / 36.0) *
-        (fast_var(cache_sgp_r_, z1) + 4 * fast_var(cache_sgp_r_, z2) +
-         4 * fast_var(cache_sgp_r_, z3) + fast_var(cache_sgp_r_, z4));
+        (dt * dt / 6.0) *
+        (fast_var(cache_sgp_r_, z1) + 2 * fast_var(cache_sgp_r_, z2) +
+         2 * fast_var(cache_sgp_r_, z3) + fast_var(cache_sgp_r_, z4));
 
     Eigen::MatrixXd Sigma_proc = Eigen::MatrixXd::Zero(6, 6);
     Sigma_proc(3, 3) = var_u;
