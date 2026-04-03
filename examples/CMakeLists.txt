@@ -65,3 +65,6 @@ target_link_libraries(maneuvering_example_KVLCC2_circle gp ${Python3_LIBRARIES} 
 
 add_executable(maneuvering_example_8mUSV maneuvering_example_8mUSV.cc )
 target_link_libraries(maneuvering_example_8mUSV gp ${Python3_LIBRARIES} casadi::casadi)
+
+add_executable(maneuvering_example_8mUSV_recursive maneuvering_example_8mUSV_recursive.cc )
+target_link_libraries(maneuvering_example_8mUSV_recursive gp ${Python3_LIBRARIES} casadi::casadi)

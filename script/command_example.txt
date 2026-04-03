@@ -1,9 +1,9 @@
 #加载KVLCC2 Z字型操纵实验数据
-python script/koopman_benchmark/koopman_scalar.py --model_name=KVLCC2 --train_file=/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/result/Zig_zag_benchmark/TrainingSet_noise.csv --test_file=/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/result/Zig_zag_benchmark/TestSet.csv --experiment_name=ZigZag
+python script/benchmark/koopman_scalar.py --model_name=KVLCC2 --train_file=/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/result/Zig_zag_benchmark/TrainingSet_noise.csv --test_file=/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/result/Zig_zag_benchmark/TestSet.csv --experiment_name=ZigZag
 
 #加载KVLCC2 回转操纵实验数据
-python script/koopman_benchmark/koopman_scalar.py --model_name=KVLCC2 --train_file=/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/result/Circle_benchmark/TrainingSet_noise.csv --test_file=/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/result/Circle_benchmark/TestSet.csv --experiment_name=Circle
+python script/benchmark/koopman_scalar.py --model_name=KVLCC2 --train_file=/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/result/Circle_benchmark/TrainingSet_noise.csv --test_file=/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/result/Circle_benchmark/TestSet.csv --experiment_name=Circle
 
 
-
-python script/koopman_benchmark/koopman_scalar.py --model_name=8mUSV --train_file=/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/result/8mUSV/8mUSV_TrainingSet_Smoothed.csv --experiment_name=Lemniscate
+#加载8mUSV实验数据进行辨识
+python script/benchmark/koopman_scalar.py --model_name=8mUSV --train_file=/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/result/8mUSV/8mUSV_TrainingSet_Smoothed.csv --experiment_name=Lemniscate

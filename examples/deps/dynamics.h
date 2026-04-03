@@ -40,6 +40,7 @@ public:
 
   void updateStructure(const std::vector<std::vector<MX>> &new_basis,
                        const std::vector<std::vector<double>> &new_params) {
+
     candidate_basis_ = new_basis;
     params_ = new_params;
 
@@ -52,15 +53,17 @@ public:
     sym_params_ = MX::sym("params", total_param_dim_);
 
     validateDimensions();
+
     initializeBasisFunctions();
+
     initializeContinuousDynamicsFunction(); // 重新生成 f_continuous_
   }
 
   /// @brief 返回某状态维度的动力学加速度值
-  /// @param state 
-  /// @param control 
+  /// @param state
+  /// @param control
   /// @param state_idx 指定状态维度索引
-  /// @return 
+  /// @return
   double getDynamicsInstance(const Eigen::VectorXd &state,
                              const Eigen::VectorXd &control,
                              size_t state_idx) const {
@@ -138,6 +141,9 @@ private:
     if (state_dim_ == 0)
       throw std::runtime_error("State dimension cannot be zero.");
     for (size_t i = 0; i < state_dim_; ++i) {
+      std::cout << "State " << i << ": " << candidate_basis_[i].size()
+                << " basis functions, " << params_[i].size() << " parameters."
+                << std::endl;
       if (candidate_basis_[i].size() != params_[i].size()) {
         throw std::runtime_error("Basis/Param count mismatch for state " +
                                  std::to_string(i));
@@ -225,6 +231,7 @@ public:
     MX u = nl_system.getSymControl();
     MX p = nl_system.getSymParams();
     MX dt_sym = MX::sym("dt");
+    flat_params_ = nl_system.getFlatParameters();
     bool has_control = (nl_system.getControlDim() > 0);
 
     auto call_f = [&](const MX &state_arg, const MX &control_arg) {
@@ -346,6 +353,13 @@ public:
     Eigen::VectorXd state_next_eigen;
     CasadiUtils::casadi2eigen(state_next_dm, state_next_eigen);
     return state_next_eigen;
+  }
+
+  std::pair<Eigen::VectorXd, Eigen::MatrixXd>
+  step_with_uncertainty(const Eigen::VectorXd &state,
+                        const Eigen::VectorXd &control, double dt,
+                        const Eigen::MatrixXd &cov_state) {
+    return step_with_uncertainty(state, control, flat_params_, dt, cov_state);
   }
 
   // RK4 step with uncertainty propagation using PRECOMPUTED MATRICES
@@ -606,11 +620,12 @@ private:
   Function df_discrete_dstate;
   Function df_discrete_dcontrol;
 
+  Eigen::VectorXd flat_params_;
+
   SGPModelCache cache_sgp_u_;
   SGPModelCache cache_sgp_v_;
   SGPModelCache cache_sgp_r_;
 };
 
-
-} // namespace CasadiUtils  
+} // namespace CasadiUtils
 #endif // DYNAMICS_H

@@ -1028,31 +1028,9 @@ Eigen::MatrixXd RecursiveGaussianProcess::getFlatPosteriorCovMatrix() {
     std::cout << "Inducing set is empty." << std::endl;
     return Eigen::MatrixXd();
   }
-  size_t m = inducingset->size();
-  size_t n = sampleset->size();
-  Eigen::MatrixXd K_RX, K_RR_half;
-  K_RX.resize(m, n);
-  K_RX.setZero();
-  K_RR_half.resize(m, m);
-  K_RR_half.setZero();
+  compute();
 
-  computeKernelMatrix(K_RX, inducingset, sampleset, cf);
-  computeKernelMatrixLowerHalf(K_RR_half, inducingset, cf);
-
-  double noise_variance =
-      std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
-  K_RR_half.diagonal().array() -= noise_variance; // subtract noise variance
-  Eigen::MatrixXd K_RR = K_RR_half + K_RR_half.transpose();
-  K_RR.diagonal().array() *= 0.5;
-
-  Eigen::MatrixXd inducingPosteriorCov;
-  inducingPosteriorCov =
-      L.triangularView<Eigen::Lower>().solve(K_RX.transpose());
-  L.triangularView<Eigen::Lower>().adjoint().solveInPlace(inducingPosteriorCov);
-
-  inducingPosteriorCov = K_RR - K_RX * inducingPosteriorCov;
-
-  return inducingPosteriorCov;
+  return cov_inducing;
 }
 
 void RecursiveGaussianProcess::setInducingTargetZeros() {

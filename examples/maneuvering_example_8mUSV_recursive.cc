@@ -1,6 +1,85 @@
 #include "deps/core.h"
 using namespace CasadiUtils;
 
+void visualize_full_state_with_cov(
+    const std::vector<Eigen::VectorXd> &state_vec,
+    const std::vector<Eigen::MatrixXd> &cov_vec,
+    const std::vector<Eigen::VectorXd> &true_state_vec,
+    const std::vector<double> &time_vec) {
+  if (true_state_vec.empty()) {
+    std::cerr << "No data to visualize." << std::endl;
+    return;
+  }
+  if (state_vec.empty()) {
+    std::cerr << "No prediction history available. Run estimate() first."
+              << std::endl;
+    return;
+  }
+  if (state_vec.size() != cov_vec.size() ||
+      state_vec.size() != true_state_vec.size() ||
+      state_vec.size() != time_vec.size()) {
+    std::cerr << "Size mismatch among state_vec, cov_vec, true_state_vec, and "
+                 "time_vec."
+              << std::endl;
+    return;
+  }
+  auto state_dim = state_vec[0].size();
+  // Visualize state trajectory with uncertainty On Training Data
+  CasadiUtils::plot_format_init(17.0, 12.0);
+  for (size_t d = 0; d < state_dim; ++d) {
+
+    std::vector<double> t_vec(time_vec.begin(), time_vec.end());
+    std::vector<double> state_mean, state_std;
+    std::vector<double> state_true;
+
+    for (size_t k = 0; k < state_vec.size(); ++k) {
+      state_mean.push_back(state_vec[k](d));
+      state_std.push_back(std::sqrt(cov_vec[k](d, d)));
+      state_true.push_back(true_state_vec[k](d));
+    }
+
+    // Create 2x3 subplot for six states
+    int nrows = 2, ncols = 3;
+
+    int row = d / ncols;
+    int col = d % ncols;
+    int idx = d + 1; // subplot index starts from 1
+    plt::subplot(nrows, ncols, idx);
+
+    plt::plot(t_vec, state_mean, {{"label", "Mean"}, {"color", "blue"}});
+    std::vector<double> state_mean_minus_state_std(state_mean.size());
+    for (size_t i = 0; i < state_mean.size(); ++i) {
+      state_mean_minus_state_std[i] = state_mean[i] - state_std[i];
+    }
+    std::vector<double> state_mean_plus_state_std(state_mean.size());
+    for (size_t i = 0; i < state_mean.size(); ++i) {
+      state_mean_plus_state_std[i] = state_mean[i] + state_std[i];
+    }
+    plt::fill_between(
+        t_vec, state_mean_minus_state_std, state_mean_plus_state_std,
+        {{"alpha", "0.2"}, {"label", "Uncertainty"}, {"color", "blue"}});
+
+    plt::plot(t_vec, state_true, {{"label", "True"}, {"color", "green"}});
+    plt::title("State " + std::to_string(d));
+    plt::xlabel("Time [s]");
+
+    plt::grid(true);
+
+    // Show the figure after all subplots are drawn
+
+    if (d == 0) {
+      
+      plt::suptitle("State Trajectory with Uncertainty");
+    }
+    if (d == state_dim - 1) {
+      plt::legend();
+      plt::tight_layout();
+      plt::show();
+    }
+  }
+  return;
+}
+
 // ==========================================
 // Main Function
 // ==========================================
@@ -18,10 +97,9 @@ int main(int argc, char const *argv[]) {
       (argc > 2) ? argv[2]
                  : "/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/"
                    "dataset/rosbag/csv/zig_zag_20_20.csv";
-  std::string model_path =
-      (argc > 3) ? argv[3]
-                 : "/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/"
-                   "dataset/rosbag/csv/";
+  std::string model_path = (argc > 3) ? argv[3]
+                                      : "/home/garronliu/2_Tracking_control/"
+                                        "GP-MPC/libgp-master/result/8mUSV/";
   try {
     plt::backend("TkAgg");
   } catch (...) {
@@ -56,18 +134,18 @@ int main(int argc, char const *argv[]) {
     MX v = MX::sym("v");
     MX r = MX::sym("r");
     MX state_sym = vertcat(x, y, psi, u, v, r);
-    MX np = MX::sym("np");
-    MX delta = MX::sym("delta");
-    MX control_sym = vertcat(np, delta);
+    MX tl = MX::sym("tl");
+    MX tr = MX::sym("tr");
+    MX control_sym = vertcat(tl, tr);
     std::vector<std::vector<MX>> basis = {
         {u * cos(psi), v * sin(psi)},
         {u * sin(psi), v * cos(psi)},
         {r},
-        {u * u, v * v, r * r, v * r, delta * delta, v * v * r, v * r * r},
-        {v, abs(v) * v, r, v * r, abs(r) * r, delta, v * delta, v * v * delta,
-         r * delta, v * v * v, r * r * r},
-        {v, abs(v) * v, r, v * r, abs(r) * r, delta, v * delta, v * v * delta,
-         r * delta, v * v * v, r * r * r},
+        {u * u, v * v, r * r, v * r, tr * tr, v * v * r, v * r * r},
+        {v, abs(v) * v, r, v * r, abs(r) * r, tr, v * tr, v * v * tr, r * tr,
+         v * v * v, r * r * r},
+        {v, abs(v) * v, r, v * r, abs(r) * r, tr, v * tr, v * v * tr, r * tr,
+         v * v * v, r * r * r},
     };
 
     // Resize init_params to match the basis size
@@ -78,22 +156,119 @@ int main(int argc, char const *argv[]) {
     NonlinearSystem system(basis, init_params, state_sym, control_sym);
 
     // 3. 加载预训练SGP模型
-    RecursiveGaussianProcess rgp_u("sgp_model.yaml");
-    RecursiveGaussianProcess rgp_v("sgp_model.yaml");
-    RecursiveGaussianProcess rgp_r("sgp_model.yaml");
+    
+    std::vector<std::unique_ptr<RecursiveGaussianProcess>> rgp_vec;
+    std::vector<std::string> model_files = {
+        model_path + "\8mUSV_DE_RandomID=8_sparse_gp_model_state_3.yaml",
+        model_path + "\8mUSV_DE_RandomID=8_sparse_gp_model_state_4.yaml",
+        model_path + "\8mUSV_DE_RandomID=8_sparse_gp_model_state_5.yaml"};
+    for (const auto &model_file : model_files) {
+      rgp_vec.push_back(
+          std::make_unique<RecursiveGaussianProcess>(model_file.c_str()));
+    }
+
     // 4. 构建RK4模型进行预测
+    RK4Simulator rk4_simulator_;
+    size_t gp_input_dim = rgp_vec[0]->get_input_dim();
+    auto active_state_mask = {false, false, false, true, true, true};
+    auto init_candidate_basis = system.getCandidateBasis();
+    auto init_updated_params = system.getParameters();
+    auto candidate_basis = init_candidate_basis;
+    auto updated_params = init_updated_params;
+    for (size_t i = 0; i < rgp_vec.size(); ++i) {
+      std::cout << "Loaded Recursive GP model for state " << i + 3 << std::endl;
+
+      Eigen::VectorXd hyperparams =
+          rgp_vec[i]->covf().get_loghyper().array().exp();
+      Eigen::VectorXd lengthscales = hyperparams.head(gp_input_dim);
+      std::cout << "hyperparams for state " << i << ": "
+                << hyperparams.transpose() << std::endl;
+
+      double process_covariance = hyperparams(gp_input_dim) * hyperparams(gp_input_dim);
+      std::vector<Eigen::VectorXd> inducing_points_vec;
+
+      auto inducing_points_mat = rgp_vec[i]->getFlatInputs();
+      for (size_t idx = 0; idx < inducing_points_mat.cols(); ++idx) {
+        inducing_points_vec.push_back(inducing_points_mat.col(idx));
+      }
+
+      std::vector<casadi::MX> state_gp_basis = CasadiUtils::buildKernelBasis(
+          state_sym, active_state_mask, control_sym, inducing_points_vec,
+          lengthscales, process_covariance);
+      candidate_basis[i + 3].insert(candidate_basis[i + 3].end(),
+                                    state_gp_basis.begin(),
+                                    state_gp_basis.end());
+      auto alpha_vec = rgp_vec[i]->getFlatAlpha();
+      for (size_t k = 0; k < alpha_vec.size(); ++k) {
+        updated_params[i + 3].insert(updated_params[i + 3].end(), alpha_vec(k));
+      }
+    }
+
+    system.updateStructure(candidate_basis, updated_params);
+
+    rk4_simulator_.reset(system);
+
+    for (size_t i = 0; i < rgp_vec.size(); ++i) {
+      rk4_simulator_.initSGPModels(i + 3, rgp_vec[i].get());
+    }
+    std::cout << "RK4 simulator initialized with loaded sparse GP models."
+              << std::endl;
+
+    Eigen::MatrixXd state_meas_cov = []() {
+      Eigen::MatrixXd cov = Eigen::MatrixXd::Zero(6, 6);
+      cov(0, 0) = std::pow(0.1, 2);                 // x
+      cov(1, 1) = std::pow(0.1, 2);                 // y
+      cov(2, 2) = std::pow(M_PI / 180.0, 2);         // psi
+      cov(3, 3) = std::pow(0.03, 2);                 // u
+      cov(4, 4) = std::pow(0.03, 2);                 // v
+      cov(5, 5) = std::pow(M_PI / 180.0 * 0.015, 2); // r
+      return cov;
+    }(); // 定义测量状态的协方差 （考虑测量的不确定度）
 
     // 4.1 记录多批次数据预测结果和误差
+    std::vector<double> time_vec;
+    std::vector<Eigen::VectorXd> state_true_vec;
+    size_t batch_size = 100; // 每批次包含100个时间步
+
     // 4.1.1 无递归更新
+    std::vector<Eigen::VectorXd> state_pred_vec_wo_recursive;
+    std::vector<Eigen::MatrixXd> state_cov_vec_wo_recursive;
+    Eigen::VectorXd state_curr = train_data.state[0];
+    Eigen::MatrixXd cov_curr = state_meas_cov;
+    state_pred_vec_wo_recursive.push_back(state_curr);
+    state_cov_vec_wo_recursive.push_back(cov_curr);
+    for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
+      if (k % batch_size == 0) {
+        // reset to true state at the beginning of each batch
+        state_curr = train_data.state[k + 1];
+        cov_curr = state_meas_cov;
+      } else {
+        // propagate with RK4 Simulator
+        double dt = train_data.time[k + 1] - train_data.time[k];
+        if (dt <= 0)
+          dt = 1e-4;
+        Eigen::VectorXd u = train_data.control.empty() ? Eigen::VectorXd()
+                                                       : train_data.control[k];
+        std::tie(state_curr, cov_curr) =
+            rk4_simulator_.step_with_uncertainty(state_curr, u, dt, cov_curr);
+      }
+      state_pred_vec_wo_recursive.push_back(state_curr);
+      state_cov_vec_wo_recursive.push_back(cov_curr);
+    }
+    std::cout << "Completed prediction without recursive update." << std::endl;
+    visualize_full_state_with_cov(state_pred_vec_wo_recursive,
+                                  state_cov_vec_wo_recursive, train_data.state,
+                                  train_data.time);
 
     // 4.1.2 有递归更新
-
     // 4.1.2.1 有超参更新
+    std::vector<Eigen::VectorXd> state_pred_vec_recursive_hyperUpdate;
+    std::vector<Eigen::MatrixXd> state_cov_vec_recursive_hyperUpdate;
 
     // 4.1.2.2 无超参更新
+    std::vector<Eigen::VectorXd> state_pred_vec_recursive_wo_hyperUpdate;
+    std::vector<Eigen::MatrixXd> state_cov_vec_recursive_wo_hyperUpdate;
 
-
-   
     std::cout << "\n\033[34m========== Done ==========\033[0m\n" << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;
