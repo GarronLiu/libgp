@@ -1,6 +1,61 @@
 #include "deps/core.h"
 using namespace CasadiUtils;
 
+MX state_sym;
+MX control_sym;
+std::vector<std::unique_ptr<RecursiveGaussianProcess>> rgp_vec;
+RK4Simulator rk4_simulator_;
+auto active_state_mask = {false, false, false, true, true, true};
+
+std::vector<std::vector<MX>> init_candidate_basis;
+std::vector<std::vector<double>> init_updated_params;
+
+void rk4_update() {
+  size_t gp_input_dim = rgp_vec[0]->get_input_dim();
+
+  auto candidate_basis = init_candidate_basis;
+  auto updated_params = init_updated_params;
+  for (size_t i = 0; i < rgp_vec.size(); ++i) {
+    std::cout << "Loaded Recursive GP model for state " << i + 3 << std::endl;
+
+    Eigen::VectorXd hyperparams =
+        rgp_vec[i]->covf().get_loghyper().array().exp();
+    Eigen::VectorXd lengthscales = hyperparams.head(gp_input_dim);
+    std::cout << "hyperparams for state " << i << ": "
+              << hyperparams.transpose() << std::endl;
+
+    double process_covariance =
+        hyperparams(gp_input_dim) * hyperparams(gp_input_dim);
+    std::vector<Eigen::VectorXd> inducing_points_vec;
+
+    auto inducing_points_mat = rgp_vec[i]->getFlatInputs();
+    for (size_t idx = 0; idx < inducing_points_mat.cols(); ++idx) {
+      inducing_points_vec.push_back(inducing_points_mat.col(idx));
+    }
+
+    std::vector<casadi::MX> state_gp_basis = CasadiUtils::buildKernelBasis(
+        state_sym, active_state_mask, control_sym, inducing_points_vec,
+        lengthscales, process_covariance);
+    candidate_basis[i + 3].insert(candidate_basis[i + 3].end(),
+                                  state_gp_basis.begin(), state_gp_basis.end());
+    auto alpha_vec = rgp_vec[i]->getFlatAlpha();
+    for (size_t k = 0; k < alpha_vec.size(); ++k) {
+      updated_params[i + 3].insert(updated_params[i + 3].end(), alpha_vec(k));
+    }
+  }
+
+  NonlinearSystem system(candidate_basis, updated_params, state_sym,
+                         control_sym);
+
+  rk4_simulator_.reset(system);
+
+  for (size_t i = 0; i < rgp_vec.size(); ++i) {
+    rk4_simulator_.initSGPModels(i + 3, rgp_vec[i].get());
+  }
+  std::cout << "RK4 simulator initialized with loaded sparse GP models."
+            << std::endl;
+}
+
 void visualize_full_state_with_cov(
     const std::vector<Eigen::VectorXd> &state_vec,
     const std::vector<Eigen::MatrixXd> &cov_vec,
@@ -68,7 +123,7 @@ void visualize_full_state_with_cov(
     // Show the figure after all subplots are drawn
 
     if (d == 0) {
-      
+
       plt::suptitle("State Trajectory with Uncertainty");
     }
     if (d == state_dim - 1) {
@@ -119,7 +174,7 @@ int main(int argc, char const *argv[]) {
 
     // 2. Define ship maneuvering system
     size_t state_dim = 3;
-    std::vector<std::vector<double>> init_params = {
+    init_updated_params = {
         {1.0, -1.0},
         {1.0, 1.0},
         {1.0},
@@ -133,11 +188,11 @@ int main(int argc, char const *argv[]) {
     MX u = MX::sym("u");
     MX v = MX::sym("v");
     MX r = MX::sym("r");
-    MX state_sym = vertcat(x, y, psi, u, v, r);
+    state_sym = vertcat(x, y, psi, u, v, r);
     MX tl = MX::sym("tl");
     MX tr = MX::sym("tr");
-    MX control_sym = vertcat(tl, tr);
-    std::vector<std::vector<MX>> basis = {
+    control_sym = vertcat(tl, tr);
+    init_candidate_basis = {
         {u * cos(psi), v * sin(psi)},
         {u * sin(psi), v * cos(psi)},
         {r},
@@ -149,15 +204,13 @@ int main(int argc, char const *argv[]) {
     };
 
     // Resize init_params to match the basis size
-    init_params[3].assign(basis[3].size(), 0.0);
-    init_params[4].assign(basis[4].size(), 0.0);
-    init_params[5].assign(basis[5].size(), 0.0);
-
-    NonlinearSystem system(basis, init_params, state_sym, control_sym);
+    init_updated_params[3].assign(init_candidate_basis[3].size(), 0.0);
+    init_updated_params[4].assign(init_candidate_basis[4].size(), 0.0);
+    init_updated_params[5].assign(init_candidate_basis[5].size(), 0.0);
 
     // 3. 加载预训练SGP模型
-    
-    std::vector<std::unique_ptr<RecursiveGaussianProcess>> rgp_vec;
+    rgp_vec.clear();
+    rgp_vec.reserve(3);
     std::vector<std::string> model_files = {
         model_path + "\8mUSV_DE_RandomID=8_sparse_gp_model_state_3.yaml",
         model_path + "\8mUSV_DE_RandomID=8_sparse_gp_model_state_4.yaml",
@@ -168,56 +221,12 @@ int main(int argc, char const *argv[]) {
     }
 
     // 4. 构建RK4模型进行预测
-    RK4Simulator rk4_simulator_;
-    size_t gp_input_dim = rgp_vec[0]->get_input_dim();
-    auto active_state_mask = {false, false, false, true, true, true};
-    auto init_candidate_basis = system.getCandidateBasis();
-    auto init_updated_params = system.getParameters();
-    auto candidate_basis = init_candidate_basis;
-    auto updated_params = init_updated_params;
-    for (size_t i = 0; i < rgp_vec.size(); ++i) {
-      std::cout << "Loaded Recursive GP model for state " << i + 3 << std::endl;
-
-      Eigen::VectorXd hyperparams =
-          rgp_vec[i]->covf().get_loghyper().array().exp();
-      Eigen::VectorXd lengthscales = hyperparams.head(gp_input_dim);
-      std::cout << "hyperparams for state " << i << ": "
-                << hyperparams.transpose() << std::endl;
-
-      double process_covariance = hyperparams(gp_input_dim) * hyperparams(gp_input_dim);
-      std::vector<Eigen::VectorXd> inducing_points_vec;
-
-      auto inducing_points_mat = rgp_vec[i]->getFlatInputs();
-      for (size_t idx = 0; idx < inducing_points_mat.cols(); ++idx) {
-        inducing_points_vec.push_back(inducing_points_mat.col(idx));
-      }
-
-      std::vector<casadi::MX> state_gp_basis = CasadiUtils::buildKernelBasis(
-          state_sym, active_state_mask, control_sym, inducing_points_vec,
-          lengthscales, process_covariance);
-      candidate_basis[i + 3].insert(candidate_basis[i + 3].end(),
-                                    state_gp_basis.begin(),
-                                    state_gp_basis.end());
-      auto alpha_vec = rgp_vec[i]->getFlatAlpha();
-      for (size_t k = 0; k < alpha_vec.size(); ++k) {
-        updated_params[i + 3].insert(updated_params[i + 3].end(), alpha_vec(k));
-      }
-    }
-
-    system.updateStructure(candidate_basis, updated_params);
-
-    rk4_simulator_.reset(system);
-
-    for (size_t i = 0; i < rgp_vec.size(); ++i) {
-      rk4_simulator_.initSGPModels(i + 3, rgp_vec[i].get());
-    }
-    std::cout << "RK4 simulator initialized with loaded sparse GP models."
-              << std::endl;
+    rk4_update();
 
     Eigen::MatrixXd state_meas_cov = []() {
       Eigen::MatrixXd cov = Eigen::MatrixXd::Zero(6, 6);
-      cov(0, 0) = std::pow(0.1, 2);                 // x
-      cov(1, 1) = std::pow(0.1, 2);                 // y
+      cov(0, 0) = std::pow(0.1, 2);                  // x
+      cov(1, 1) = std::pow(0.1, 2);                  // y
       cov(2, 2) = std::pow(M_PI / 180.0, 2);         // psi
       cov(3, 3) = std::pow(0.03, 2);                 // u
       cov(4, 4) = std::pow(0.03, 2);                 // v
@@ -264,7 +273,52 @@ int main(int argc, char const *argv[]) {
     // 4.1.2.1 有超参更新
     std::vector<Eigen::VectorXd> state_pred_vec_recursive_hyperUpdate;
     std::vector<Eigen::MatrixXd> state_cov_vec_recursive_hyperUpdate;
+    state_curr = train_data.state[0];
+    cov_curr = state_meas_cov;
+    for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
+      if (k % batch_size == 0) {
+        // reset to true state at the beginning of each batch
+        state_curr = train_data.state[k + 1];
+        cov_curr = state_meas_cov;
+        for(size_t dim = 0; dim < 3;++dim){
+          rgp_vec[dim]->epochUpdate();
+        }
+        rk4_update();
+      } else {
+        // propagate with RK4 Simulator
+        double dt = train_data.time[k + 1] - train_data.time[k];
+        if (dt <= 0)
+          dt = 1e-4;
+        Eigen::VectorXd u = train_data.control.empty() ? Eigen::VectorXd()
+                                                       : train_data.control[k];
+        std::tie(state_curr, cov_curr) =
+            rk4_simulator_.step_with_uncertainty(state_curr, u, dt, cov_curr);
+      }
+      state_pred_vec_recursive_hyperUpdate.push_back(state_curr);
+      state_cov_vec_recursive_hyperUpdate.push_back(cov_curr);
 
+      // 计算uvr的中心微分
+      if (k > 0 && k < train_data.state.size() - 2) {
+        double dt_fwd = train_data.time[k + 1] - train_data.time[k];
+        double dt_bwd = train_data.time[k] - train_data.time[k - 1];
+        auto dx_fwd = train_data.state[k + 1].segment(3, 3) -
+                      train_data.state[k].segment(3, 3);
+        auto dx_bwd = train_data.state[k].segment(3, 3) -
+                      train_data.state[k - 1].segment(3, 3);
+        auto uvr_derivatives = (dx_fwd / dt_fwd + dx_bwd / dt_bwd) / 2.0;
+
+        Eigen::VectorXd gp_input(5);
+        gp_input << train_data.state[k].segment(3, 3), train_data.control[k];
+        for (size_t dim = 0; dim < 3; ++dim) {
+          //添加batch training data到每个递归GP模型中进行超参更新
+          rgp_vec[dim]->add_pattern(gp_input.data(), uvr_derivatives(dim));
+        }
+      }
+    }
+    std::cout << "Completed prediction with recursive update." << std::endl;
+    visualize_full_state_with_cov(state_pred_vec_recursive_hyperUpdate,
+                                  state_cov_vec_recursive_hyperUpdate,
+                                  train_data.state, train_data.time);
     // 4.1.2.2 无超参更新
     std::vector<Eigen::VectorXd> state_pred_vec_recursive_wo_hyperUpdate;
     std::vector<Eigen::MatrixXd> state_cov_vec_recursive_wo_hyperUpdate;

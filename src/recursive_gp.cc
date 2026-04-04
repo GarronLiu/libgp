@@ -560,11 +560,11 @@ std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
 
   size_t n = sampleset->size();
   size_t m = inducingset->size();
-  size_t batch_size = 50;
+  size_t batch_size = 10;
   size_t param_dim =
       cf->get_param_dim() + m * input_dim; // 超参数维度 + 诱导点位置维度
   if (!adam_optimizer) {
-    adam_optimizer.reset(new AdamOptimizer(param_dim, 0.002));
+    adam_optimizer.reset(new AdamOptimizer(param_dim, 0.001));
   }
 
   size_t max_batches = (n + batch_size - 1) / batch_size;
@@ -617,6 +617,8 @@ std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
   cov_inducing = chol_inverse(Lambda_0);
 
   cf->loghyper_changed = true;
+
+  sampleset->clear(); // 清空样本集，准备下一轮训练
 
   return epoch_lml;
 }
