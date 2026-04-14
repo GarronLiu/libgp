@@ -78,7 +78,7 @@ void RecursiveGaussianProcess::addNewInducingPoints() {
   size_t n = sampleset->size();
 
   double novelty_threshold =
-      0.25 * std::exp(cf->get_loghyper()(cf->get_param_dim() - 2) *
+      0.05 * std::exp(cf->get_loghyper()(cf->get_param_dim() - 2) *
                       2.0); //使用signal_variance的1/5作为阈值
   Eigen::MatrixXd K_RR(m, m);
   computeKernelMatrixLowerHalf(K_RR, inducingset, cf);
@@ -497,8 +497,6 @@ void RecursiveGaussianProcess::updatePosteriorWithHistoryInfo(
 }
 
 void RecursiveGaussianProcess::storeOldPosterior() {
-  if (!old_posterior_need_store)
-    return;
   inducingset_pre = new SampleSet(static_cast<int>(get_input_dim()));
   for (size_t i = 0; i < inducingset->size(); i++) {
     inducingset_pre->add(inducingset->x(i), inducingset->y(i));
@@ -518,7 +516,6 @@ void RecursiveGaussianProcess::storeOldPosterior() {
 
   invP_pre = inv_Sigma_u_pre - inv_K_aa_pre; // inv(P_pre)
   P_pre = chol_inverse(invP_pre);
-  old_posterior_need_store = false;
 }
 
 std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
@@ -533,8 +530,6 @@ std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
               << std::endl;
     return {};
   }
-
-  old_posterior_need_store = true;
 
   storeOldPosterior();
 
@@ -560,11 +555,11 @@ std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
 
   size_t n = sampleset->size();
   size_t m = inducingset->size();
-  size_t batch_size = 10;
+  size_t batch_size = 50;
   size_t param_dim =
       cf->get_param_dim() + m * input_dim; // 超参数维度 + 诱导点位置维度
   if (!adam_optimizer) {
-    adam_optimizer.reset(new AdamOptimizer(param_dim, 0.001));
+    adam_optimizer.reset(new AdamOptimizer(param_dim, 0.002));
   }
 
   size_t max_batches = (n + batch_size - 1) / batch_size;
@@ -599,7 +594,7 @@ std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
       Eigen::VectorXd params = get_hyperparameters();
 
       bool converged = adam_optimizer->step(elbo_dot_0, params);
-      update_hyperparameters(params);
+      // update_hyperparameters(params);
       epoch_lml.push_back(elbo_0);
       if (converged) {
         std::cout << "Optimization converged at iteration "
@@ -617,8 +612,6 @@ std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
   cov_inducing = chol_inverse(Lambda_0);
 
   cf->loghyper_changed = true;
-
-  sampleset->clear(); // 清空样本集，准备下一轮训练
 
   return epoch_lml;
 }

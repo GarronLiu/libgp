@@ -152,9 +152,10 @@ int main(int argc, char const *argv[]) {
       (argc > 2) ? argv[2]
                  : "/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/"
                    "dataset/rosbag/csv/zig_zag_20_20.csv";
-  std::string model_path = (argc > 3) ? argv[3]
-                                      : "/home/garronliu/2_Tracking_control/"
-                                        "GP-MPC/libgp-master/result/8mUSV/";
+  std::string model_path = (argc > 3)
+                               ? argv[3]
+                               : "/home/garronliu/2_Tracking_control/"
+                                 "GP-MPC/libgp-master/result/8mUSV_Recursive";
   try {
     plt::backend("TkAgg");
   } catch (...) {
@@ -210,14 +211,16 @@ int main(int argc, char const *argv[]) {
 
     // 3. 加载预训练SGP模型
     rgp_vec.clear();
-    rgp_vec.reserve(3);
+    rgp_vec.resize(3);
     std::vector<std::string> model_files = {
-        model_path + "\8mUSV_DE_RandomID=8_sparse_gp_model_state_3.yaml",
-        model_path + "\8mUSV_DE_RandomID=8_sparse_gp_model_state_4.yaml",
-        model_path + "\8mUSV_DE_RandomID=8_sparse_gp_model_state_5.yaml"};
-    for (const auto &model_file : model_files) {
-      rgp_vec.push_back(
-          std::make_unique<RecursiveGaussianProcess>(model_file.c_str()));
+        model_path + "/8mUSV_GA_RandomID=0_sparse_gp_model_state_3.yaml",
+        model_path + "/8mUSV_GA_RandomID=0_sparse_gp_model_state_4.yaml",
+        model_path + "/8mUSV_GA_RandomID=0_sparse_gp_model_state_5.yaml"};
+    for (size_t i = 0; i < model_files.size(); ++i) {
+      rgp_vec[i] =
+          std::make_unique<RecursiveGaussianProcess>(model_files[i].c_str());
+      rgp_vec[i]->sampleset->clear(); // Clear the sample set to prepare for
+                                      // online updates
     }
 
     // 4. 构建RK4模型进行预测
@@ -237,7 +240,7 @@ int main(int argc, char const *argv[]) {
     // 4.1 记录多批次数据预测结果和误差
     std::vector<double> time_vec;
     std::vector<Eigen::VectorXd> state_true_vec;
-    size_t batch_size = 100; // 每批次包含100个时间步
+    size_t epoch_size = 100; // 每批次包含100个时间步
 
     // 4.1.1 无递归更新
     std::vector<Eigen::VectorXd> state_pred_vec_wo_recursive;
@@ -247,7 +250,7 @@ int main(int argc, char const *argv[]) {
     state_pred_vec_wo_recursive.push_back(state_curr);
     state_cov_vec_wo_recursive.push_back(cov_curr);
     for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
-      if (k % batch_size == 0) {
+      if (k % epoch_size == 0) {
         // reset to true state at the beginning of each batch
         state_curr = train_data.state[k + 1];
         cov_curr = state_meas_cov;
@@ -275,12 +278,14 @@ int main(int argc, char const *argv[]) {
     std::vector<Eigen::MatrixXd> state_cov_vec_recursive_hyperUpdate;
     state_curr = train_data.state[0];
     cov_curr = state_meas_cov;
+    state_pred_vec_recursive_hyperUpdate.push_back(state_curr);
+    state_cov_vec_recursive_hyperUpdate.push_back(cov_curr);
     for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
-      if (k % batch_size == 0) {
+      if (k % epoch_size == 0 && k > 0) {
         // reset to true state at the beginning of each batch
         state_curr = train_data.state[k + 1];
         cov_curr = state_meas_cov;
-        for(size_t dim = 0; dim < 3;++dim){
+        for (size_t dim = 0; dim < 3; ++dim) {
           rgp_vec[dim]->epochUpdate();
         }
         rk4_update();
@@ -306,11 +311,12 @@ int main(int argc, char const *argv[]) {
         auto dx_bwd = train_data.state[k].segment(3, 3) -
                       train_data.state[k - 1].segment(3, 3);
         auto uvr_derivatives = (dx_fwd / dt_fwd + dx_bwd / dt_bwd) / 2.0;
-
         Eigen::VectorXd gp_input(5);
-        gp_input << train_data.state[k].segment(3, 3), train_data.control[k];
-        for (size_t dim = 0; dim < 3; ++dim) {
-          //添加batch training data到每个递归GP模型中进行超参更新
+        gp_input << train_data.state[k](3), train_data.state[k](4),
+            train_data.state[k](5), train_data.control[k](0),
+            train_data.control[k](1);
+
+        for (int dim = 0; dim < 3; ++dim) {
           rgp_vec[dim]->add_pattern(gp_input.data(), uvr_derivatives(dim));
         }
       }
@@ -322,6 +328,56 @@ int main(int argc, char const *argv[]) {
     // 4.1.2.2 无超参更新
     std::vector<Eigen::VectorXd> state_pred_vec_recursive_wo_hyperUpdate;
     std::vector<Eigen::MatrixXd> state_cov_vec_recursive_wo_hyperUpdate;
+    state_curr = train_data.state[0];
+    cov_curr = state_meas_cov;
+    state_pred_vec_recursive_wo_hyperUpdate.push_back(state_curr);
+    state_cov_vec_recursive_wo_hyperUpdate.push_back(cov_curr);
+
+    for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
+      if (k % epoch_size == 0 && k > 0) {
+        // reset to true state at the beginning of each batch
+        state_curr = train_data.state[k + 1];
+        cov_curr = state_meas_cov;
+        // for (size_t dim = 0; dim < 3; ++dim) {
+        //   rgp_vec[dim]->epochUpdate();
+        // }
+        // rk4_update();
+      } else {
+        // propagate with RK4 Simulator
+        double dt = train_data.time[k + 1] - train_data.time[k];
+        if (dt <= 0)
+          dt = 1e-4;
+        Eigen::VectorXd u = train_data.control.empty() ? Eigen::VectorXd()
+                                                       : train_data.control[k];
+        std::tie(state_curr, cov_curr) =
+            rk4_simulator_.step_with_uncertainty(state_curr, u, dt, cov_curr);
+      }
+      state_pred_vec_recursive_wo_hyperUpdate.push_back(state_curr);
+      state_cov_vec_recursive_wo_hyperUpdate.push_back(cov_curr);
+
+      // // 计算uvr的中心微分
+      // if (k > 0 && k < train_data.state.size() - 2) {
+      //   double dt_fwd = train_data.time[k + 1] - train_data.time[k];
+      //   double dt_bwd = train_data.time[k] - train_data.time[k - 1];
+      //   auto dx_fwd = train_data.state[k + 1].segment(3, 3) -
+      //                 train_data.state[k].segment(3, 3);
+      //   auto dx_bwd = train_data.state[k].segment(3, 3) -
+      //                 train_data.state[k - 1].segment(3, 3);
+      //   auto uvr_derivatives = (dx_fwd / dt_fwd + dx_bwd / dt_bwd) / 2.0;
+      //   Eigen::VectorXd gp_input(5);
+      //   gp_input << train_data.state[k](3), train_data.state[k](4),
+      //       train_data.state[k](5), train_data.control[k](0),
+      //       train_data.control[k](1);
+
+      //   for (int dim = 0; dim < 3; ++dim) {
+      //     rgp_vec[dim]->add_pattern(gp_input.data(), uvr_derivatives(dim));
+      //   }
+      // }
+    }
+    std::cout << "Completed prediction with recursive update." << std::endl;
+    visualize_full_state_with_cov(state_pred_vec_recursive_wo_hyperUpdate,
+                                  state_cov_vec_recursive_wo_hyperUpdate,
+                                  train_data.state, train_data.time);
 
     std::cout << "\n\033[34m========== Done ==========\033[0m\n" << std::endl;
   } catch (const std::exception &e) {

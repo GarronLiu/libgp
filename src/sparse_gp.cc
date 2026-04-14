@@ -572,6 +572,7 @@ Eigen::VectorXd SparseGaussianProcess::get_hyperparameters() {
 }
 
 Eigen::MatrixXd SparseGaussianProcess::getFlatInputs() {
+  compute();
   if (inducingset->size() < 1) {
     std::cout << "Inducing set is empty." << std::endl;
     return Eigen::MatrixXd();

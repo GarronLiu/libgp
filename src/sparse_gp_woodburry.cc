@@ -5,6 +5,7 @@
 #include "cov_factory.h"
 #include "sparse_gp.h"
 
+#include <chrono>
 #include <cmath>
 #include <ctime>
 #include <fstream>
@@ -64,35 +65,7 @@ SparseGaussianProcess::SparseGaussianProcess(const char *filename) {
   std::string fname(filename);
   YAML::Node config = YAML::LoadFile(filename);
   try {
-    // 1. Sampling Points
-    sampleset = new SampleSet(input_dim);
-    if (config["sampling_points"]) {
-      for (const auto &pt : config["sampling_points"]) {
-        std::vector<double> vec = pt.as<std::vector<double>>();
-        Eigen::VectorXd x = Eigen::Map<Eigen::VectorXd>(vec.data(), vec.size());
-        sampleset->add(x, 0.0);
-      }
-    } else {
-      std::cout << "Warning: No sampling points provided in YAML file."
-                << std::endl;
-      std::cout << " please add sampling points to use the GP model."
-                << std::endl;
-    }
-    // 2. Sampling Targets
-    size_t n = sampleset->size();
-    Eigen::VectorXd mean(n);
-    if (config["sampling_targets"]) {
-      std::vector<std::vector<double>> mean_vecs =
-          config["sampling_targets"].as<std::vector<std::vector<double>>>();
-      if (!mean_vecs.empty()) {
-        std::vector<double> &v = mean_vecs[0];
-        mean = Eigen::Map<Eigen::VectorXd>(v.data(), v.size());
-        for (size_t i = 0; i < v.size(); ++i) {
-          sampleset->set_y(i, v[i]);
-        }
-      }
-    }
-    // 3.Kernel & Hyperparameters
+    // 1.Kernel & Hyperparameters
     if (config["kernel"]) {
       YAML::Node kernel = config["kernel"];
       std::string kernel_name = kernel["type"].as<std::string>();
@@ -108,7 +81,6 @@ SparseGaussianProcess::SparseGaussianProcess(const char *filename) {
       // Re-create covariance function
       CovFactory factory;
       cf = factory.create(input_dim, kernel_name);
-      cf->loghyper_changed = 0;
       // Set params
       std::vector<double> params =
           kernel["hyperparameters"].as<std::vector<double>>();
@@ -124,24 +96,44 @@ SparseGaussianProcess::SparseGaussianProcess(const char *filename) {
       std::cout << " please add kernel definition to use the GP model."
                 << std::endl;
     }
-    // 4. Inducing Points
+    // 2. Sampling Points & Sampling Targets
+    std::cout << "Loading SGP model from YAML file: " << filename << std::endl;
+    sampleset = new SampleSet(input_dim);
+    if (config["sampling_points"] && config["sampling_points"].size() > 0) {
+      for (const auto &pt : config["sampling_points"]) {
+        std::vector<double> vec = pt.as<std::vector<double>>();
+        Eigen::VectorXd x = Eigen::Map<Eigen::VectorXd>(vec.data(), vec.size());
+        sampleset->add(x, 0.0);
+      }
+      size_t n = sampleset->size();
+      Eigen::VectorXd mean(n);
+      std::vector<std::vector<double>> mean_vecs =
+          config["sampling_targets"].as<std::vector<std::vector<double>>>();
+      if (!mean_vecs.empty()) {
+        std::vector<double> &v = mean_vecs[0];
+        mean = Eigen::Map<Eigen::VectorXd>(v.data(), v.size());
+        for (size_t i = 0; i < v.size(); ++i) {
+          sampleset->set_y(i, v[i]);
+        }
+      }
+    } else {
+      std::cout << "Warning: No sampling points provided in YAML file."
+                << std::endl;
+      std::cout << " please add sampling points to use the GP model."
+                << std::endl;
+    }
+    // 4. Inducing Points & inducing posterior mean & inducing posterior
+    // covariance
     inducingset = new SampleSet(input_dim);
-    if (config["inducing_points"]) {
+    if (config["inducing_points"] && config["inducing_targets"] &&
+        config["inducing_cov"]) {
       for (const auto &pt : config["inducing_points"]) {
         std::vector<double> vec = pt.as<std::vector<double>>();
         Eigen::VectorXd x = Eigen::Map<Eigen::VectorXd>(vec.data(), vec.size());
         inducingset->add(x, 0.0);
       }
-    } else {
-      std::cout << "Warning: No inducing points provided in YAML file."
-                << std::endl;
-      std::cout << " please add inducing points to use the SGP model."
-                << std::endl;
-    }
-    size_t m = inducingset->size();
-    // 5. inducing posterior mean
-    Eigen::VectorXd mean_u(m);
-    if (config["inducing_targets"]) {
+      size_t m = inducingset->size();
+      Eigen::VectorXd mean_u(m);
       std::vector<std::vector<double>> mean_vecs =
           config["inducing_targets"].as<std::vector<std::vector<double>>>();
       if (!mean_vecs.empty()) {
@@ -151,16 +143,7 @@ SparseGaussianProcess::SparseGaussianProcess(const char *filename) {
           inducingset->set_y(i, v[i]);
         }
       }
-    } else {
-      std::cout << "Warning: No inducing targets provided in YAML file."
-                << std::endl;
-      std::cout << " please add inducing targets to use the SGP model."
-                << std::endl;
-    }
-
-    // 6. inducing posterior covariance
-    cov_inducing.resize(m, m);
-    if (config["inducing_cov"]) {
+      cov_inducing.resize(m, m);
       std::vector<std::vector<double>> cov_rows =
           config["inducing_cov"].as<std::vector<std::vector<double>>>();
       for (size_t i = 0; i < m; ++i) {
@@ -168,6 +151,37 @@ SparseGaussianProcess::SparseGaussianProcess(const char *filename) {
           cov_inducing(i, j) = cov_rows[i][j];
         }
       }
+
+      cf->loghyper_changed = false;
+      alpha_needs_update = false;
+
+      Eigen::MatrixXd K_RR;
+      K_RR.resize(m, m);
+      computeKernelMatrixLowerHalf(K_RR, inducingset, cf);
+      double noise_variance =
+          std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
+      K_RR.diagonal().array() -= noise_variance;
+      L_K_RR = chol_lower(K_RR);
+      K_RR = K_RR.selfadjointView<Eigen::Lower>();
+
+      // precompute alpha_R = L_K_RR^{-T} * mean_inducing for fast prediction
+      alpha_R.resize(m);
+      alpha_R = L_K_RR.triangularView<Eigen::Lower>().solve(mean_u);
+      L_K_RR.triangularView<Eigen::Lower>().adjoint().solveInPlace(alpha_R);
+
+      // precompute Q_pred = K_** - K_*R * K_RR^{-1} * K_R* for fast variance
+      // prediction
+      Q_pred.resize(m, m);
+      Q_pred.setZero();
+      Eigen::MatrixXd K_diff = K_RR - cov_inducing;
+      Eigen::MatrixXd iK_RR = chol_inverse(K_RR);
+      Q_pred.noalias() = iK_RR * K_diff * iK_RR;
+
+    } else {
+      std::cout << "Warning: No inducing points provided in YAML file."
+                << std::endl;
+      std::cout << " please add inducing points to use the SGP model."
+                << std::endl;
     }
 
     std::cout << "Initialized SparseGP from YAML model: " << filename
@@ -181,15 +195,19 @@ SparseGaussianProcess::SparseGaussianProcess(const char *filename) {
 SparseGaussianProcess::~SparseGaussianProcess() { // free memory
   if (inducingset != NULL)
     delete inducingset;
+  if (inducingset_pre != NULL)
+    delete inducingset_pre;
+  if (batchset != NULL)
+    delete batchset;
 }
 
 double SparseGaussianProcess::f(const double x[]) {
-
   if (inducingset->empty())
     return 0;
 
   Eigen::Map<const Eigen::VectorXd> x_star(x, input_dim);
   compute();
+  update_alpha();
   update_k_star(x_star);
   return k_star.dot(alpha_R);
 }
@@ -199,6 +217,7 @@ double SparseGaussianProcess::var(const double x[]) {
     return 0;
   Eigen::Map<const Eigen::VectorXd> x_star(x, input_dim);
   compute();
+  update_alpha();
   update_k_star(x_star);
   double output = cf->get(x_star, x_star) - k_star.dot(Q_pred * k_star);
   if (output < 0.0) {
@@ -247,107 +266,190 @@ void SparseGaussianProcess::pred_diag_derivative(
 }
 
 void SparseGaussianProcess::compute() {
-  if (!cf->loghyper_changed && !alpha_needs_update)
+
+  if (!cf->loghyper_changed)
     return;
   cf->loghyper_changed = false;
-  size_t m = inducingset->size();
-  size_t n = sampleset->size();
 
-  // calculate Kernel matrix K_RX from inducing set
-  Eigen::MatrixXd K_RX, K_RR;
-  K_RX.resize(m, n);
-  K_RX.setZero();
-  K_RR.resize(m, m);
-  K_RR.setZero();
+  if (stream_update_flag) {
 
-  computeKernelMatrix(K_RX, inducingset, sampleset, cf);
-  computeKernelMatrixLowerHalf(K_RR, inducingset, cf);
+    size_t param_dim = cf->get_param_dim();
+    size_t m_a = inducingset_pre->size();
+    size_t m = inducingset->size();
+    size_t b = batchset->size();
+    double noise_variance = std::exp(cf->get_loghyper()(param_dim - 1) * 2);
 
-  double noise_variance =
-      std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
+    Eigen::MatrixXd K_RX, K_RR, K_Ra;
+    K_RX.resize(m, b);
+    K_RX.setZero();
+    K_RR.resize(m, m);
+    K_RR.setZero();
+    K_Ra.resize(m, m_a);
+    K_Ra.setZero();
 
-  K_RR.diagonal().array() -= noise_variance; // subtract noise variance
-  K_RR.diagonal().array() += 1e-6;           // jitter for numerical stability
-  L_K_RR = K_RR.selfadjointView<Eigen::Lower>().llt().matrixL();
+    computeKernelMatrix(K_RX, inducingset, batchset, cf);
+    computeKernelMatrixLowerHalf(K_RR, inducingset, cf);
+    computeKernelMatrix(K_Ra, inducingset, inducingset_pre, cf);
 
-  // Calculate covariance matrix of inducing set \Sigma_u = K_{uu} - v^double v
-  U.resize(m, n);
-  U = L_K_RR.triangularView<Eigen::Lower>().solve(K_RX);
+    K_RR.diagonal().array() -= noise_variance;
+    K_RR = K_RR.selfadjointView<Eigen::Lower>();
+    L_K_RR = chol_lower(K_RR);
 
-  // Q_ff_diag = diag(U^T * U) = colSquaredNorm(U)
-  Eigen::VectorXd Q_ff_diag = U.colwise().squaredNorm();
+    U.resize(m, b);
+    U = L_K_RR.triangularView<Eigen::Lower>().solve(K_RX);
+    U_a.resize(m, m_a);
+    U_a = L_K_RR.triangularView<Eigen::Lower>().solve(K_Ra);
 
-  Eigen::VectorXd K_XX_diag(n);
-  for (size_t i = 0; i < n; ++i) {
-    K_XX_diag(i) = cf->get(sampleset->x(i), sampleset->x(i)) - noise_variance;
+    Eigen::VectorXd Q_ff_diag = U.colwise().squaredNorm();
+
+    Eigen::VectorXd K_XX_diag(b);
+    for (size_t i = 0; i < b; i++) {
+      K_XX_diag(i) = cf->get(batchset->x(i), batchset->x(i)) - noise_variance;
+    }
+
+    lambda.resize(b);
+    lambda = param_alpha * (K_XX_diag - Q_ff_diag);
+    lambda.array() += noise_variance;
+
+    Eigen::VectorXd inv_lambda = lambda.cwiseInverse();
+
+    lambda_a.resize(m_a, m_a);
+    Eigen::MatrixXd K_aa(m_a, m_a);
+    computeKernelMatrixLowerHalf(K_aa, inducingset_pre, cf);
+    K_aa.diagonal().array() -= noise_variance;
+    K_aa = K_aa.selfadjointView<Eigen::Lower>();
+    Eigen::MatrixXd Q_aa = U_a.transpose() * U_a;
+    lambda_a.noalias() = P_pre + param_alpha * (K_aa - Q_aa);
+    // lambda_a.diagonal().array() += 0.01;  //
+    // 添加遗忘因子，使得旧数据的影响逐渐减弱
+
+    Eigen::MatrixXd U_scaled = U;
+    for (size_t i = 0; i < b; ++i) {
+      U_scaled.col(i) *= inv_lambda(i);
+    }
+    Eigen::MatrixXd B = Eigen::MatrixXd::Identity(m, m);
+    B.noalias() += U_scaled * U.transpose();
+
+    L_B.resize(m, m);
+    L_B = chol_lower(B);
+
+    Eigen::MatrixXd inv_A(b, b);
+    Eigen::MatrixXd temp = L_B.triangularView<Eigen::Lower>().solve(U_scaled);
+    inv_A.noalias() = -temp.transpose() * temp;
+    inv_A.diagonal() += inv_lambda;
+
+    temp.resize(m_a, b);
+    temp = U_a.transpose() * U;
+    Eigen::MatrixXd C_inv_A = temp * inv_A;
+
+    Eigen::MatrixXd M_shur(m_a, m_a);
+    M_shur.noalias() = Q_aa + lambda_a - C_inv_A * temp.transpose();
+    L_M_shur.resize(m_a, m_a);
+    L_M_shur = chol_lower(M_shur);
+
+    const std::vector<double> &targets = batchset->y();
+    Eigen::Map<const Eigen::VectorXd> y(&targets[0], b);
+
+    temp.resize(m_a, b);
+    temp = L_M_shur.triangularView<Eigen::Lower>().solve(C_inv_A);
+    Eigen::VectorXd y_tilde = temp * y;
+
+    alpha.resize(b + m_a);
+    alpha.head(b) = temp.transpose() * y_tilde;
+    alpha.head(b) += inv_A * y;
+    alpha.tail(m_a) =
+        -L_M_shur.triangularView<Eigen::Lower>().adjoint().solve(y_tilde);
+
+    Eigen::VectorXd y_a_tilde =
+        L_M_shur.triangularView<Eigen::Lower>().solve(y_a);
+    alpha.head(b) -= temp.transpose() * y_a_tilde;
+    alpha.tail(m_a) +=
+        L_M_shur.triangularView<Eigen::Lower>().adjoint().solve(y_a_tilde);
+
+    Eigen::VectorXd mean_inducing;
+    mean_inducing.resize(m);
+    mean_inducing.setZero();
+    mean_inducing.noalias() = K_RX * alpha.head(b) + K_Ra * alpha.tail(m_a);
+    for (size_t i = 0; i < m; ++i) {
+      inducingset->set_y(i, mean_inducing(i));
+    }
+
+  } else {
+    size_t m = inducingset->size();
+    size_t n = sampleset->size();
+
+    // calculate Kernel matrix K_RX from inducing set
+    Eigen::MatrixXd K_RX, K_RR;
+    K_RX.resize(m, n);
+    K_RX.setZero();
+    K_RR.resize(m, m);
+    K_RR.setZero();
+
+    computeKernelMatrix(K_RX, inducingset, sampleset, cf);
+    computeKernelMatrixLowerHalf(K_RR, inducingset, cf);
+
+    double noise_variance =
+        std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
+
+    K_RR.diagonal().array() -= noise_variance; // subtract noise variance
+    K_RR.diagonal().array() += 1e-6;           // jitter for numerical stability
+    L_K_RR = K_RR.selfadjointView<Eigen::Lower>().llt().matrixL();
+
+    // Calculate covariance matrix of inducing set \Sigma_u = K_{uu} - v^double
+    // v
+    U.resize(m, n);
+    U = L_K_RR.triangularView<Eigen::Lower>().solve(K_RX);
+
+    // Q_ff_diag = diag(U^T * U) = colSquaredNorm(U)
+    Eigen::VectorXd Q_ff_diag = U.colwise().squaredNorm();
+
+    Eigen::VectorXd K_XX_diag(n);
+    for (size_t i = 0; i < n; ++i) {
+      K_XX_diag(i) = cf->get(sampleset->x(i), sampleset->x(i)) - noise_variance;
+    }
+    K_XX_diag.array() += 1e-6; // jitter for numerical stability
+
+    lambda.resize(n);
+    lambda = param_alpha * (K_XX_diag - Q_ff_diag);
+    lambda.array() += noise_variance;
+
+    // 4. 计算 Woodbury 中间矩阵 B = I + U * Lambda^{-1} * U^T
+    Eigen::VectorXd inv_lambda = lambda.cwiseInverse();
+
+    // U_scaled = U * diag(inv_lambda)
+    Eigen::MatrixXd U_scaled = U;
+    for (size_t i = 0; i < n; ++i)
+      U_scaled.col(i) *= inv_lambda(i);
+
+    Eigen::MatrixXd B = Eigen::MatrixXd::Identity(m, m);
+    // B = I + U_scaled * U^T -> O(M^2 * N)
+    B.noalias() += U_scaled * U.transpose();
+
+    L_B.resize(m, m);
+    L_B = B.llt().matrixL();
+
+    const std::vector<double> &targets = sampleset->y();
+    Eigen::Map<const Eigen::VectorXd> y(&targets[0], n);
+    Eigen::VectorXd y_tilde = y.cwiseProduct(inv_lambda); // Lambda^{-1} * y
+
+    Eigen::VectorXd v = U * y_tilde; // U * Lambda^{-1} * y
+
+    L_B.triangularView<Eigen::Lower>().solveInPlace(v); // L_B^{-1} * v
+    L_B.triangularView<Eigen::Lower>().adjoint().solveInPlace(v);
+
+    // alpha = Lambda^{-1} y - Lambda^{-1} U^T B^{-1} U Lambda^{-1} y
+    //       = y_tilde - Lambda^{-1} U^T z
+    alpha.resize(n);
+    alpha = y_tilde -
+            (U.transpose() * v)
+                .cwiseProduct(inv_lambda); // Lambda^{-1} * y - H^T * B^{-1}
+                                           // * H * Lambda^{-1} * y
+    Eigen::VectorXd mean_inducing = L_K_RR * U * alpha;
+    for (size_t i = 0; i < m; ++i) {
+      inducingset->set_y(i, mean_inducing(i));
+    }
   }
-  K_XX_diag.array() += 1e-6; // jitter for numerical stability
-
-  lambda.resize(n);
-  lambda = param_alpha * (K_XX_diag - Q_ff_diag);
-  lambda.array() += noise_variance;
-
-  // 4. 计算 Woodbury 中间矩阵 B = I + U * Lambda^{-1} * U^T
-  Eigen::VectorXd inv_lambda = lambda.cwiseInverse();
-
-  // U_scaled = U * diag(inv_lambda)
-  Eigen::MatrixXd U_scaled = U;
-  for (size_t i = 0; i < n; ++i)
-    U_scaled.col(i) *= inv_lambda(i);
-
-  Eigen::MatrixXd B = Eigen::MatrixXd::Identity(m, m);
-  // B = I + U_scaled * U^T -> O(M^2 * N)
-  B.noalias() += U_scaled * U.transpose();
-
-  L_B.resize(m, m);
-  L_B = B.llt().matrixL();
-
-  const std::vector<double> &targets = sampleset->y();
-  Eigen::Map<const Eigen::VectorXd> y(&targets[0], n);
-  Eigen::VectorXd y_tilde = y.cwiseProduct(inv_lambda); // Lambda^{-1} * y
-
-  Eigen::VectorXd v = U * y_tilde; // U * Lambda^{-1} * y
-
-  L_B.triangularView<Eigen::Lower>().solveInPlace(v); // L_B^{-1} * v
-  L_B.triangularView<Eigen::Lower>().adjoint().solveInPlace(v);
-
-  // alpha = Lambda^{-1} y - Lambda^{-1} U^T B^{-1} U Lambda^{-1} y
-  //       = y_tilde - Lambda^{-1} U^T z
-  alpha.resize(n);
-  alpha =
-      y_tilde - (U.transpose() * v)
-                    .cwiseProduct(inv_lambda); // Lambda^{-1} * y - H^T * B^{-1}
-                                               // * H * Lambda^{-1} * y
-
-  Eigen::VectorXd temp = U * alpha;
-  alpha_R.resize(m);
-  alpha_R = L_K_RR.triangularView<Eigen::Lower>().adjoint().solve(temp);
-
-  // compute the posterior mean of inducing points
-  K_RR = K_RR.selfadjointView<Eigen::Lower>();
-  Eigen::VectorXd mean_u = K_RR * alpha_R;
-  for (size_t i = 0; i < m; ++i) {
-    inducingset->set_y(i, mean_u(i));
-  }
-
-  // Q_pred = L_uu^{-T} * (I - B^{-1}) * L_uu^{-1}
-  // var = k** - k*u * Q_pred * ku*
-  Eigen::MatrixXd I_M = Eigen::MatrixXd::Identity(m, m);
-  Eigen::MatrixXd B_inv = I_M;
-  L_B.triangularView<Eigen::Lower>().solveInPlace(B_inv);
-  L_B.triangularView<Eigen::Lower>().adjoint().solveInPlace(B_inv);
-
-  Eigen::MatrixXd M_mid = I_M - B_inv; // M x M 对称矩阵
-
-  // 计算 L^{-1}
-  Eigen::MatrixXd L_inv = I_M;
-  L_K_RR.triangularView<Eigen::Lower>().solveInPlace(L_inv);
-
-  // 组合： Q = L^{-T} * M_mid * L^{-1}
-  // Q = (L^{-1})^T * M_mid * L^{-1}
-  Q_pred = L_inv.transpose() * M_mid * L_inv;
-
-  alpha_needs_update = false;
+  alpha_needs_update = true;
 }
 
 void SparseGaussianProcess::update_k_star(const Eigen::VectorXd &x_star) {
@@ -356,6 +458,67 @@ void SparseGaussianProcess::update_k_star(const Eigen::VectorXd &x_star) {
   for (size_t i = 0; i < m; ++i) {
     k_star(i) = cf->get(x_star, inducingset->x(i));
   }
+}
+
+void SparseGaussianProcess::update_alpha() {
+  if (!alpha_needs_update)
+    return;
+  alpha_needs_update = false;
+  size_t m = inducingset->size();
+
+  if (stream_update_flag) {
+    size_t m_a = inducingset_pre->size();
+
+    Eigen::MatrixXd L_K_RR_T = L_K_RR.transpose();
+    Eigen::MatrixXd X = L_B.triangularView<Eigen::Lower>().solve(L_K_RR_T);
+    cov_inducing = X.transpose() * X;
+
+    Eigen::MatrixXd U_scaled = U;
+    Eigen::VectorXd inv_lambda = lambda.cwiseInverse();
+    for (size_t i = 0; i < batchset->size(); ++i) {
+      U_scaled.col(i) *= inv_lambda(i);
+    }
+
+    Eigen::MatrixXd U_scaled_UT = U_scaled * U.transpose();
+    Eigen::MatrixXd temp;
+    temp.resize(m, m);
+    temp = L_B.triangularView<Eigen::Lower>().solve(U_scaled_UT);
+    Eigen::MatrixXd v(m_a, m);
+    v.noalias() =
+        U_a.transpose() * (U_scaled_UT - temp.transpose() * temp) * L_K_RR_T;
+    L_M_shur.triangularView<Eigen::Lower>().solveInPlace(v);
+    cov_inducing -= v.transpose() * v;
+
+    Eigen::MatrixXd v_a(m_a, m);
+    v_a.noalias() = U_a.transpose() * L_K_RR_T;
+
+    L_M_shur.triangularView<Eigen::Lower>().solveInPlace(v_a);
+    cov_inducing -= v_a.transpose() * v_a;
+
+    cov_inducing += v.transpose() * v_a;
+    cov_inducing += v_a.transpose() * v;
+
+  } else {
+    // $$ \Sigma_u = L_{K_RR} B^{-1} L_{K_RR}^T $$
+    Eigen::MatrixXd L_K_RR_T = L_K_RR.transpose();
+    Eigen::MatrixXd X = L_B.triangularView<Eigen::Lower>().solve(L_K_RR_T);
+    cov_inducing = X.transpose() * X;
+  }
+
+  // precompute alpha_R = L_K_RR^{-T} * mean_inducing for fast prediction
+  const std::vector<double> &targets = inducingset->y();
+  Eigen::Map<const Eigen::VectorXd> mean_inducing(&targets[0], m);
+  alpha_R.resize(m);
+  alpha_R = L_K_RR.triangularView<Eigen::Lower>().solve(mean_inducing);
+  L_K_RR.triangularView<Eigen::Lower>().adjoint().solveInPlace(alpha_R);
+
+  // precompute Q_pred for fast variance prediction
+  Q_pred.resize(m, m);
+  Q_pred.setZero();
+  Eigen::MatrixXd K_RR = L_K_RR * L_K_RR.transpose();
+  Eigen::MatrixXd K_diff = K_RR - cov_inducing;
+  Eigen::MatrixXd iK_RR = chol_inverse(K_RR);
+  Q_pred.noalias() = iK_RR * K_diff * iK_RR;
 }
 
 void SparseGaussianProcess::add_pattern(const double x[], double y) {
@@ -460,36 +623,65 @@ void SparseGaussianProcess::specify_inducingSet(
     std::cout << "initialize " << inducingSet_size
               << " inducing points using K-means clustering" << std::endl;
   }
-  alpha_needs_update = true;
+  cf->loghyper_changed = true;
 }
 
 double SparseGaussianProcess::log_likelihood() {
   compute();
-  size_t n = sampleset->size();
-  const std::vector<double> &targets = sampleset->y();
-  Eigen::Map<const Eigen::VectorXd> y(&targets[0], sampleset->size());
 
-  // 1. Data Fit term: -0.5 * y^T * K^{-1} * y
-  double data_fit = -0.5 * y.dot(alpha);
+  if (stream_update_flag) {
+    /// TODO:
+    size_t b = batchset->size();
+    size_t m_a = inducingset_pre->size();
 
-  // 2. Complexity Penalty: -0.5 * log|K|
-  // Matrix Determinant Lemma: log|K| = log|Lambda| + log|B|
-  double log_det_B = 2 * L_B.diagonal().array().log().sum();
-  double log_det_lambda = lambda.array().log().sum();
-  double log_det_K = log_det_lambda + log_det_B;
+    double noise_variance =
+        std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
+    Eigen::VectorXd y(b + m_a);
+    y.head(b) = Eigen::Map<const Eigen::VectorXd>(&batchset->y()[0], b);
+    y.tail(m_a) = y_a;
+    double data_fit = y.dot(alpha);
 
-  // 3. Regularizer (Power EP term)
-  double regularizer_term = 0.0;
-  double noise_variance =
-      std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
+    double log_det_B = 2 * L_B.diagonal().array().log().sum();
+    double log_det_lambda = lambda.array().log().sum();
+    double log_det_M_shur = 2 * L_M_shur.diagonal().array().log().sum();
+    double log_det_K = log_det_lambda + log_det_B + log_det_M_shur;
 
-  if (std::abs(param_alpha - 1.0) > 1e-6) {
-    Eigen::VectorXd ratio = lambda.array() / noise_variance;
-    regularizer_term =
-        0.5 * (1 - param_alpha) / param_alpha * ratio.array().log().sum();
+    double regularizer_term = 0.0;
+    regularizer_term -= static_cast<double>(b) * (1 - param_alpha) /
+                        param_alpha * std::log(noise_variance);
+
+    regularizer_term += (1 - param_alpha) / param_alpha * log_det_lambda;
+    regularizer_term -= (1 - param_alpha) / param_alpha * logDet(lambda_a);
+
+    return -0.5 * (static_cast<double>(b) * log2pi + log_det_K + data_fit +
+                   regularizer_term + elbo_constant_init);
+
+  } else {
+    size_t n = sampleset->size();
+    const std::vector<double> &targets = sampleset->y();
+    Eigen::Map<const Eigen::VectorXd> y(&targets[0], sampleset->size());
+    // 1. Data Fit term: -0.5 * y^T * K^{-1} * y
+    double data_fit = -0.5 * y.dot(alpha);
+
+    // 2. Complexity Penalty: -0.5 * log|K|
+    // Matrix Determinant Lemma: log|K| = log|Lambda| + log|B|
+    double log_det_B = 2 * L_B.diagonal().array().log().sum();
+    double log_det_lambda = lambda.array().log().sum();
+    double log_det_K = log_det_lambda + log_det_B;
+
+    // 3. Regularizer (Power EP term)
+    double regularizer_term = 0.0;
+    double noise_variance =
+        std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
+
+    if (std::abs(param_alpha - 1.0) > 1e-6) {
+      Eigen::VectorXd ratio = lambda.array() / noise_variance;
+      regularizer_term =
+          0.5 * (1 - param_alpha) / param_alpha * ratio.array().log().sum();
+    }
+
+    return data_fit - 0.5 * log_det_K - 0.5 * n * log2pi - regularizer_term;
   }
-
-  return data_fit - 0.5 * log_det_K - 0.5 * n * log2pi - regularizer_term;
 }
 
 Eigen::VectorXd SparseGaussianProcess::log_likelihood_gradient() {
@@ -502,89 +694,309 @@ Eigen::VectorXd SparseGaussianProcess::log_likelihood_gradient() {
   Eigen::VectorXd grad(grad_dim);
   grad.setZero();
 
-  // W = K_XX_bar^(-1) - K_XX_bar^(-1) * y * y^T * K_XX_bar^(-1)
-  // K_XX_bar^(-1) = Lambda^{-1} - Lambda^{-1} * U^T * B^{-1} * U * Lambda^{-1}
-  Eigen::VectorXd inv_lambda = lambda.cwiseInverse();
-  Eigen::MatrixXd U_scaled = U;
-  for (size_t i = 0; i < n; ++i) {
-    U_scaled.col(i) *= inv_lambda(i);
-  }
+  if (stream_update_flag) {
+    /// TODO:
+    size_t b = batchset->size();
+    size_t m_a = inducingset_pre->size();
+    Eigen::MatrixXd inv_A, H_T, H_a_T;
+    H_T = L_K_RR.triangularView<Eigen::Lower>().adjoint().solve(U);
+    H_a_T = L_K_RR.triangularView<Eigen::Lower>().adjoint().solve(U_a);
+    Eigen::MatrixXd H = H_T.transpose();
+    Eigen::MatrixXd H_a = H_a_T.transpose();
 
-  Eigen::MatrixXd Y = L_B.triangularView<Eigen::Lower>().solve(U_scaled);
-  Eigen::MatrixXd W = -Y.transpose() * Y;
-  W.diagonal() += inv_lambda;
-  W -= alpha * alpha.transpose();
-
-  Eigen::MatrixXd Diag_W = W.diagonal().asDiagonal().toDenseMatrix();
-
-  double noise_variance =
-      std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
-  Eigen::MatrixXd Diag_sigmaNoise_alphaDx_Inv =
-      inv_lambda.asDiagonal().toDenseMatrix();
-
-  Eigen::MatrixXd H_T =
-      L_K_RR.triangularView<Eigen::Lower>().adjoint().solve(U);
-  Eigen::MatrixXd H = H_T.transpose();
-
-  Eigen::MatrixXd G_RX, G_RR;
-  G_RX.resize(m, n);
-  G_RR.resize(m, m);
-  G_RX = H_T * (W - param_alpha * Diag_W -
-                (1 - param_alpha) * Diag_sigmaNoise_alphaDx_Inv);
-  G_RR = -G_RX * H;
-  Eigen::VectorXd G_XX_diag =
-      W.diagonal() +
-      (1 - param_alpha) / param_alpha * Diag_sigmaNoise_alphaDx_Inv.diagonal();
-
-  Eigen::VectorXd g_cov(cf->get_param_dim()); // temporary gradient storage
-  Eigen::VectorXd g_ind(
-      input_dim); // temporary gradient storage for inducing point location
-  // gradient loop over K_RX
-  for (size_t i = 0; i < m; ++i) {
-    for (size_t j = 0; j < n; ++j) {
-      g_cov.setZero();
-      g_ind.setZero();
-      cf->grad(inducingset->x(i), sampleset->x(j), g_cov);
-      cf->grad_wrt_x1(inducingset->x(i), sampleset->x(j), g_ind);
-      grad.head(cf->get_param_dim()) -= G_RX(i, j) * g_cov;
-      grad.segment(cf->get_param_dim() + i * input_dim, input_dim) -=
-          G_RX(i, j) * g_ind;
+    Eigen::VectorXd inv_lambda = lambda.cwiseInverse();
+    Eigen::MatrixXd U_scaled = U;
+    for (size_t i = 0; i < b; ++i) {
+      U_scaled.col(i) *= inv_lambda(i);
     }
-  }
 
-  // gradient loop over K_RR
-  for (size_t i = 0; i < m; ++i) {
-    for (size_t j = 0; j <= i; ++j) {
-      g_cov.setZero();
-      g_ind.setZero();
-      cf->grad(inducingset->x(i), inducingset->x(j), g_cov);
-      if (i == j) {
-        g_cov[cf->get_param_dim() - 1] = 0; // derivative wrt noise variance
-        grad.head(cf->get_param_dim()) -= G_RR(i, j) * g_cov * 0.5;
-      } else {
-        grad.head(cf->get_param_dim()) -= G_RR(i, j) * g_cov;
-        cf->grad_wrt_x1(inducingset->x(i), inducingset->x(j), g_ind);
-        grad.segment(cf->get_param_dim() + i * input_dim, input_dim) -=
-            G_RR(i, j) * g_ind;
-        grad.segment(cf->get_param_dim() + j * input_dim, input_dim) +=
-            G_RR(i, j) * g_ind;
+    inv_A.resize(b, b);
+    Eigen::MatrixXd temp = L_B.triangularView<Eigen::Lower>().solve(U_scaled);
+    inv_A.noalias() = -temp.transpose() * temp;
+    inv_A.diagonal() += inv_lambda;
+
+    Eigen::MatrixXd W_11, W_12, W_21, W_22;
+    W_11.resize(b, b);
+    W_12.resize(b, m_a);
+    W_21.resize(m_a, b);
+    W_22.resize(m_a, m_a);
+
+    W_21.noalias() = U_a.transpose() * U * inv_A;
+    L_M_shur.triangularView<Eigen::Lower>().solveInPlace(W_21);
+    W_11.noalias() = inv_A + W_21.transpose() * W_21;
+
+    L_M_shur.triangularView<Eigen::Lower>().adjoint().solveInPlace(W_21);
+    W_21.array() *= -1.0;
+
+    W_22 = Eigen::MatrixXd::Identity(m_a, m_a);
+    L_M_shur.triangularView<Eigen::Lower>().solveInPlace(W_22);
+    L_M_shur.triangularView<Eigen::Lower>().adjoint().solveInPlace(W_22);
+
+    W_11 -= alpha.head(b) * alpha.head(b).transpose();
+    W_21 -= alpha.tail(m_a) * alpha.head(b).transpose();
+    W_12 = W_21.transpose();
+    W_22 -= alpha.tail(m_a) * alpha.tail(m_a).transpose();
+
+    Eigen::MatrixXd G_RX, G_RR, G_Ra, G_aa;
+    Eigen::VectorXd G_XX;
+
+    Eigen::VectorXd diag_W_11 = W_11.diagonal();
+
+    W_11.diagonal().array() *= (1.0 - param_alpha);
+
+    G_RX = 2.0 * H_T * W_11;
+    G_RX += 2.0 * H_a_T * W_21;
+    Eigen::MatrixXd H_T_scaled = H_T;
+    for (size_t i = 0; i < b; ++i) {
+      H_T_scaled.col(i) *= inv_lambda(i);
+    }
+    G_RX -= 2.0 * (1.0 - param_alpha) * H_T_scaled;
+
+    G_RR = -H_T * W_11 * H;
+    G_RR -= H_T * W_12 * H_a;
+    G_RR -= H_a_T * W_21 * H;
+    G_RR -= (1.0 - param_alpha) * H_a_T * W_22 * H_a;
+    G_RR += (1.0 - param_alpha) * H_T_scaled * H;
+    Eigen::MatrixXd L_lambda_a = chol_lower(lambda_a);
+    temp = L_lambda_a.triangularView<Eigen::Lower>().solve(H_a);
+    G_RR -= (1.0 - param_alpha) * temp.transpose() * temp;
+
+    G_Ra = 2.0 * H_T * W_12;
+    G_Ra += 2.0 * (1.0 - param_alpha) * H_a_T * W_22;
+    L_lambda_a.triangularView<Eigen::Lower>().adjoint().solveInPlace(temp);
+    G_Ra += 2.0 * (1.0 - param_alpha) * temp.transpose();
+
+    // G_aa^T = αW_22 - (1-α) Σ_a^{-1}
+    G_aa = param_alpha * W_22;
+    Eigen::MatrixXd inv_lambda_a = Eigen::MatrixXd::Identity(m_a, m_a);
+    L_lambda_a.triangularView<Eigen::Lower>().solveInPlace(inv_lambda_a);
+    L_lambda_a.triangularView<Eigen::Lower>().adjoint().solveInPlace(
+        inv_lambda_a);
+    G_aa -= (1.0 - param_alpha) * inv_lambda_a;
+
+    // G_ff^T = αW_11 + (1-α) Σ_y^{-1}
+    G_XX = param_alpha * diag_W_11;
+    G_XX += (1.0 - param_alpha) * inv_lambda;
+
+    Eigen::VectorXd g_cov(cf->get_param_dim());
+    Eigen::VectorXd g_ind(input_dim);
+
+    // Gradient loop over K_RX
+    for (size_t i = 0; i < m; ++i) {
+      for (size_t j = 0; j < b; ++j) {
+        g_cov.setZero();
+        g_ind.setZero();
+        cf->grad(inducingset->x(i), batchset->x(j), g_cov);
+        cf->grad_wrt_x1(inducingset->x(i), batchset->x(j), g_ind);
+        grad.head(cf->get_param_dim()) += G_RX(i, j) * g_cov;
+        grad.segment(cf->get_param_dim() + i * input_dim, input_dim) +=
+            G_RX(i, j) * g_ind;
       }
     }
+
+    // gradient loop over K_RR
+    for (size_t i = 0; i < m; ++i) {
+      for (size_t j = 0; j <= i; ++j) {
+        g_cov.setZero();
+        g_ind.setZero();
+        cf->grad(inducingset->x(i), inducingset->x(j), g_cov);
+        if (i == j) {
+          g_cov[cf->get_param_dim() - 1] = 0; // derivative wrt noise variance
+          grad.head(cf->get_param_dim()) += G_RR(i, j) * g_cov;
+        } else {
+          g_cov[cf->get_param_dim() - 1] = 0; // derivative wrt noise variance
+          grad.head(cf->get_param_dim()) += G_RR(i, j) * g_cov * 2.0;
+          cf->grad_wrt_x1(inducingset->x(i), inducingset->x(j), g_ind);
+          grad.segment(cf->get_param_dim() + i * input_dim, input_dim) +=
+              G_RR(i, j) * g_ind * 2.0;
+          grad.segment(cf->get_param_dim() + j * input_dim, input_dim) -=
+              G_RR(j, i) * g_ind * 2.0;
+        }
+      }
+    }
+
+    // gradient loop over K_Ra
+    for (size_t i = 0; i < m; ++i) {
+      for (size_t j = 0; j < m_a; ++j) {
+        g_cov.setZero();
+        g_ind.setZero();
+        cf->grad(inducingset->x(i), inducingset_pre->x(j), g_cov);
+        cf->grad_wrt_x1(inducingset->x(i), inducingset_pre->x(j), g_ind);
+        grad.head(cf->get_param_dim()) += G_Ra(i, j) * g_cov;
+        grad.segment(cf->get_param_dim() + i * input_dim, input_dim) +=
+            G_Ra(i, j) * g_ind;
+      }
+    }
+
+    // gradient loop over K_aa
+    for (size_t i = 0; i < m_a; ++i) {
+      for (size_t j = 0; j <= i; ++j) {
+        g_cov.setZero();
+        cf->grad(inducingset_pre->x(i), inducingset_pre->x(j), g_cov);
+        g_cov[cf->get_param_dim() - 1] = 0; // derivative wrt noise variance
+        if (i == j) {
+          grad.head(cf->get_param_dim()) += G_aa(i, j) * g_cov;
+        } else {
+          grad.head(cf->get_param_dim()) += G_aa(i, j) * g_cov * 2.0;
+        }
+      }
+    }
+
+    // gradient loop over K_XX
+    for (size_t i = 0; i < b; ++i) {
+      g_cov.setZero();
+      cf->grad(batchset->x(i), batchset->x(i), g_cov);
+      g_cov[cf->get_param_dim() - 1] = 0.0;
+      grad.head(cf->get_param_dim()) += G_XX(i) * g_cov;
+    }
+
+    // gradient wrt noise variance (last hyperparameter)
+    double noise_variance =
+        std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
+    grad[cf->get_param_dim() - 1] +=
+        diag_W_11.array().sum() +
+        (1 - param_alpha) / param_alpha * inv_lambda.sum();
+    grad[cf->get_param_dim() - 1] *= noise_variance * 2.0;
+    grad[cf->get_param_dim() - 1] -=
+        (1 - param_alpha) / param_alpha * static_cast<double>(b) * 2.0;
+
+    return -0.5 * grad;
+  } else {
+    // W = K_XX_bar^(-1) - K_XX_bar^(-1) * y * y^T * K_XX_bar^(-1)
+    // K_XX_bar^(-1) = Lambda^{-1} - Lambda^{-1} * U^T * B^{-1} * U *
+    // Lambda^{-1}
+    Eigen::VectorXd inv_lambda = lambda.cwiseInverse();
+    Eigen::MatrixXd U_scaled = U;
+    for (size_t i = 0; i < n; ++i) {
+      U_scaled.col(i) *= inv_lambda(i);
+    }
+
+    Eigen::MatrixXd Y = L_B.triangularView<Eigen::Lower>().solve(U_scaled);
+    Eigen::MatrixXd W = -Y.transpose() * Y;
+    W.diagonal() += inv_lambda;
+    W -= alpha * alpha.transpose();
+
+    Eigen::MatrixXd Diag_W = W.diagonal().asDiagonal().toDenseMatrix();
+
+    double noise_variance =
+        std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
+    Eigen::MatrixXd Diag_sigmaNoise_alphaDx_Inv =
+        inv_lambda.asDiagonal().toDenseMatrix();
+
+    Eigen::MatrixXd H_T =
+        L_K_RR.triangularView<Eigen::Lower>().adjoint().solve(U);
+    Eigen::MatrixXd H = H_T.transpose();
+
+    Eigen::MatrixXd G_RX, G_RR;
+    G_RX.resize(m, n);
+    G_RR.resize(m, m);
+    G_RX = H_T * (W - param_alpha * Diag_W -
+                  (1 - param_alpha) * Diag_sigmaNoise_alphaDx_Inv);
+    G_RR = -G_RX * H;
+    Eigen::VectorXd G_XX_diag =
+        W.diagonal() + (1 - param_alpha) / param_alpha *
+                           Diag_sigmaNoise_alphaDx_Inv.diagonal();
+
+    Eigen::VectorXd g_cov(cf->get_param_dim()); // temporary gradient storage
+    Eigen::VectorXd g_ind(
+        input_dim); // temporary gradient storage for inducing point location
+    // gradient loop over K_RX
+    for (size_t i = 0; i < m; ++i) {
+      for (size_t j = 0; j < n; ++j) {
+        g_cov.setZero();
+        g_ind.setZero();
+        cf->grad(inducingset->x(i), sampleset->x(j), g_cov);
+        cf->grad_wrt_x1(inducingset->x(i), sampleset->x(j), g_ind);
+        grad.head(cf->get_param_dim()) -= G_RX(i, j) * g_cov;
+        grad.segment(cf->get_param_dim() + i * input_dim, input_dim) -=
+            G_RX(i, j) * g_ind;
+      }
+    }
+
+    // gradient loop over K_RR
+    for (size_t i = 0; i < m; ++i) {
+      for (size_t j = 0; j <= i; ++j) {
+        g_cov.setZero();
+        g_ind.setZero();
+        cf->grad(inducingset->x(i), inducingset->x(j), g_cov);
+        if (i == j) {
+          g_cov[cf->get_param_dim() - 1] = 0; // derivative wrt noise variance
+          grad.head(cf->get_param_dim()) -= G_RR(i, j) * g_cov * 0.5;
+        } else {
+          grad.head(cf->get_param_dim()) -= G_RR(i, j) * g_cov;
+          cf->grad_wrt_x1(inducingset->x(i), inducingset->x(j), g_ind);
+          grad.segment(cf->get_param_dim() + i * input_dim, input_dim) -=
+              G_RR(i, j) * g_ind;
+          grad.segment(cf->get_param_dim() + j * input_dim, input_dim) +=
+              G_RR(i, j) * g_ind;
+        }
+      }
+    }
+
+    // gradient loop over K_XX
+    for (size_t i = 0; i < n; ++i) {
+      g_cov.setZero();
+      cf->grad(sampleset->x(i), sampleset->x(i), g_cov);
+      double grad_noise = g_cov[cf->get_param_dim() - 1];
+      g_cov *= param_alpha;
+      g_cov[cf->get_param_dim() - 1] = grad_noise;
+      grad.head(cf->get_param_dim()) -= G_XX_diag(i) * g_cov * 0.5;
+    }
+
+    grad[cf->get_param_dim() - 1] += (1 - param_alpha) / param_alpha * n;
+
+    return grad;
+  }
+}
+
+void SparseGaussianProcess::check_gradient() {
+  Eigen::VectorXd analytic_grad = log_likelihood_gradient(); // 您的解析梯度
+
+  double epsilon = 1e-5; // 小扰动
+  // 对每个参数进行数值梯度计算
+  Eigen::VectorXd params = get_hyperparameters();
+  Eigen::VectorXd numeric_grad(params.size());
+
+  for (int i = 0; i < params.size(); ++i) {
+    double original = params(i);
+
+    // 前向扰动
+    params(i) = original + epsilon;
+    update_hyperparameters(params);
+    double f_plus = log_likelihood(); // 需要实现
+
+    // 后向扰动
+    params(i) = original - epsilon;
+    update_hyperparameters(params);
+    double f_minus = log_likelihood();
+
+    // 中心差分
+    numeric_grad(i) = (f_plus - f_minus) / (2 * epsilon);
+
+    // 恢复参数
+    params(i) = original;
   }
 
-  // gradient loop over K_XX
-  for (size_t i = 0; i < n; ++i) {
-    g_cov.setZero();
-    cf->grad(sampleset->x(i), sampleset->x(i), g_cov);
-    double grad_noise = g_cov[cf->get_param_dim() - 1];
-    g_cov *= param_alpha;
-    g_cov[cf->get_param_dim() - 1] = grad_noise;
-    grad.head(cf->get_param_dim()) -= G_XX_diag(i) * g_cov * 0.5;
+  update_hyperparameters(params); // 恢复原始参数
+
+  // 比较解析梯度和数值梯度
+  double rel_error = (analytic_grad - numeric_grad).norm() /
+                     (analytic_grad.norm() + numeric_grad.norm() + 1e-8);
+
+  std::cout << "相对误差: " << rel_error << std::endl;
+  if (rel_error > 1e-4) {
+    std::cout << "梯度可能存在错误！" << std::endl;
   }
 
-  grad[cf->get_param_dim() - 1] += (1 - param_alpha) / param_alpha * n;
-
-  return grad;
+  // 逐项显示误差
+  std::cout << "参数\t解析梯度\t数值梯度\t绝对误差\t相对误差" << std::endl;
+  for (int i = 0; i < params.size(); ++i) {
+    double abs_err = std::abs(analytic_grad(i) - numeric_grad(i));
+    double rel_err = abs_err / (std::abs(analytic_grad(i)) +
+                                std::abs(numeric_grad(i)) + 1e-12);
+    std::cout << i << "\t" << analytic_grad(i) << "\t" << numeric_grad(i)
+              << "\t" << abs_err << "\t" << rel_err << std::endl;
+  }
 }
 
 void SparseGaussianProcess::update_hyperparameters(
@@ -597,7 +1009,100 @@ void SparseGaussianProcess::update_hyperparameters(
         params.segment(cf->get_param_dim() + i * input_dim, input_dim);
     inducingset->add(x, 0.0);
   }
-  alpha_needs_update = true;
+}
+
+void SparseGaussianProcess::add_pattern_batch(const Eigen::VectorXd &x,
+                                              double y) {
+  size_t input_dim = x.size();
+  assert(input_dim == this->input_dim);
+
+  static bool batch_initialized = false;
+  if (!batch_initialized) {
+    batchset = new SampleSet(input_dim);
+    batch_initialized = true;
+  }
+  batchset->add(x.data(), y);
+  stream_update_flag = true;
+  cf->loghyper_changed = true; // trigger recomputation in compute()
+
+  if (!pretrained_stored) {
+    storePosteriorPretrained(); // 保存预训练模型的相关参数
+    pretrained_stored = true;
+  }
+  addNewInducingPoints(x);
+}
+
+void SparseGaussianProcess::storePosteriorPretrained() {
+  inducingset_pre = new SampleSet(static_cast<int>(get_input_dim()));
+  for (size_t i = 0; i < inducingset->size(); i++) {
+    inducingset_pre->add(inducingset->x(i), inducingset->y(i));
+  }
+
+  size_t m_a = inducingset_pre->size();
+
+  double noise_variance =
+      std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
+  Eigen::MatrixXd K_aa(m_a, m_a);
+  computeKernelMatrixLowerHalf(K_aa, inducingset_pre, cf);
+  K_aa.diagonal().array() -= noise_variance + 1e-6; // subtract noise variance
+  K_aa_pre = K_aa.selfadjointView<Eigen::Lower>();  // ensure K_aa_pre is lower
+                                                    // triangular
+  inv_K_aa_pre = chol_inverse(K_aa);
+  Sigma_u_pre = cov_inducing;
+  inv_Sigma_u_pre = chol_inverse(cov_inducing);
+
+  invP_pre = inv_Sigma_u_pre - inv_K_aa_pre; // inv(P_pre)
+  P_pre = chol_inverse(invP_pre);
+
+  const std::vector<double> &inducing_pre_targets = inducingset_pre->y();
+  Eigen::Map<const Eigen::VectorXd> mean_a(&inducing_pre_targets[0], m_a);
+
+  Eigen::VectorXd inv_Sigma_u_pre_mean_a = inv_Sigma_u_pre * mean_a;
+  Eigen::VectorXd P_pre_inv_Sigma_u_pre_mean_a = P_pre * inv_Sigma_u_pre_mean_a;
+  y_a = P_pre_inv_Sigma_u_pre_mean_a;
+
+  elbo_constant_init =
+      -logDet(K_aa_pre) + logDet(Sigma_u_pre); // constant w.r.t. new batch
+  elbo_constant_init -=
+      mean_a.dot((inv_Sigma_u_pre * P_pre_inv_Sigma_u_pre_mean_a -
+                  inv_Sigma_u_pre_mean_a)); // constant w.r.t. new batch
+  elbo_constant_init -=
+      1 / param_alpha * logDet(P_pre); // constant w.r.t. new batch
+}
+
+void SparseGaussianProcess::addNewInducingPoints(Eigen::VectorXd x_t) {
+  size_t m = inducingset->size();
+
+  static double novelty_threshold =
+      0.05 * std::exp(cf->get_loghyper()(cf->get_param_dim() - 2) *
+                      2.0); //使用signal_variance的1/5作为阈值
+  Eigen::MatrixXd K_RR(m, m);
+  computeKernelMatrixLowerHalf(K_RR, inducingset, cf);
+  static double noise_variance =
+      std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2.0);
+  static auto invK_RR = chol_inverse(K_RR);
+  //计算novelty：gama = K_tt-K_tr * inv(K_rr) * K_rt
+  Eigen::VectorXd k_rt(m);
+  for (size_t j = 0; j < m; j++) {
+    k_rt(j) = cf->get(x_t, inducingset->x(j));
+  }
+  Eigen::VectorXd v = invK_RR * k_rt;
+  double k_tt = cf->get(x_t, x_t) - noise_variance;
+  double gamma = k_tt - v.dot(k_rt.transpose());
+  // std::cout << "Novelty (gamma) for sample " << i << ": " << gamma <<
+  // std::endl;
+  if (gamma > novelty_threshold) {
+    inducingset->add(x_t, 0.0);
+    //通过分块矩阵拓展的方式更新inv(K_RR)
+    size_t new_m = inducingset->size();
+    invK_RR.conservativeResize(new_m, new_m);
+    double alpha = 1.0 / gamma;
+    invK_RR.block(0, 0, m, m) += alpha * v * v.transpose();
+    invK_RR.block(m, 0, 1, m) = -alpha * v.transpose();
+    invK_RR.block(0, m, m, 1) = -alpha * v;
+    invK_RR(m, m) = alpha;
+    m = new_m;
+  }
 }
 
 Eigen::VectorXd SparseGaussianProcess::get_hyperparameter_lower_bound() {
@@ -635,7 +1140,7 @@ void SparseGaussianProcess::update_variational_parameters(
     Eigen::VectorXd x = params.segment(i * input_dim, input_dim);
     inducingset->add(x, 0.0);
   }
-  alpha_needs_update = true;
+  cf->loghyper_changed = true;
 }
 
 Eigen::VectorXd SparseGaussianProcess::get_variational_parameters() {
@@ -690,13 +1195,9 @@ Eigen::MatrixXd SparseGaussianProcess::getFlatPosteriorCovMatrix() {
     return Eigen::MatrixXd();
   }
   compute();
-  Eigen::MatrixXd inducingPosteriorCov;
-  // $$ \Sigma_u = L_{K_RR} B^{-1} L_{K_RR}^T $$
-  Eigen::MatrixXd L_K_RR_T = L_K_RR.transpose();
-  Eigen::MatrixXd X = L_B.triangularView<Eigen::Lower>().solve(L_K_RR_T);
-  inducingPosteriorCov = X.transpose() * X;
+  update_alpha();
 
-  return inducingPosteriorCov;
+  return cov_inducing;
 }
 
 Eigen::VectorXd SparseGaussianProcess::getFlatHyperparameters() {
@@ -709,6 +1210,7 @@ Eigen::VectorXd SparseGaussianProcess::getFlatAlpha() {
     return Eigen::VectorXd();
   }
   compute();
+  update_alpha();
   return alpha_R;
 }
 

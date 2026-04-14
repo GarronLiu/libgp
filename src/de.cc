@@ -41,12 +41,13 @@ void DE::maximize(GaussianProcess* gp, size_t max_generations, bool verbose)
     lml_history_.reserve(max_generations);
     time_cost_history_.clear();
     time_cost_history_.reserve(max_generations);
-
+    std::cout << "Starting DE optimization for " << max_generations << " generations..." << std::endl;
     Eigen::VectorXd initial_params = gp->get_hyperparameters();
     // 获取超参的上下界
     Eigen::VectorXd lb = gp->get_hyperparameter_lower_bound();
     Eigen::VectorXd ub = gp->get_hyperparameter_upper_bound();
-
+    std::cout << "Initial Hyperparameters: " << initial_params.transpose() << std::endl;
+    
     int param_dim = initial_params.size();
 
     // 1. 初始化种群

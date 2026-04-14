@@ -34,7 +34,7 @@ private:
   double beta2_;
   double epsilon_;
   double tolerance_; // 新增：收敛判断阈值
-  
+
   int iteration_;
   Eigen::VectorXd m_; // 一阶矩估计
   Eigen::VectorXd v_; // 二阶矩估计
@@ -149,59 +149,31 @@ protected:
                             // alpha->0 corresponds to VFE
 
   // variables related to pretrained posterior
-  Eigen::MatrixXd inv_K_aa_pre, K_aa_pre;
-  Eigen::MatrixXd inv_Sigma_u_pre, Sigma_u_pre;
-  Eigen::MatrixXd P_pre, invP_pre;
+  using SparseGaussianProcess::inv_K_aa_pre;
+  using SparseGaussianProcess::inv_Sigma_u_pre;
+  using SparseGaussianProcess::invP_pre;
+  using SparseGaussianProcess::K_aa_pre;
+  using SparseGaussianProcess::P_pre;
+  using SparseGaussianProcess::Sigma_u_pre;
 
   SampleSet *inducingset_pre; // inducing points
 
-  bool old_posterior_need_store = false;
-
-  // inline Cholesky helpers to simplify repeated patterns below
-  inline auto chol_lower(const Eigen::MatrixXd &A) -> Eigen::MatrixXd {
-    return A.selfadjointView<Eigen::Lower>().llt().matrixL();
-  };
-
-  inline auto chol_inverse(const Eigen::MatrixXd &A) -> Eigen::MatrixXd {
-    auto A_jitter = A + Eigen::MatrixXd::Identity(A.rows(), A.cols()) * 1e-6;
-    Eigen::MatrixXd L = chol_lower(A_jitter);
-    Eigen::MatrixXd inv = Eigen::MatrixXd::Identity(L.rows(), L.cols());
-    L.triangularView<Eigen::Lower>().solveInPlace(inv);
-    L.adjoint().triangularView<Eigen::Upper>().solveInPlace(inv);
-    return inv;
-  };
-
-  // solve A * X = B using Cholesky of A (A must be SPD)
-  inline decltype(auto) chol_solve(const Eigen::MatrixXd &A,
-                                   Eigen::MatrixXd B) {
-    if (B.rows() != A.cols())
-      throw std::invalid_argument("Incompatible matrix dimensions");
-
-    Eigen::MatrixXd L = chol_lower(A);
-    L.triangularView<Eigen::Lower>().solveInPlace(B);
-    L.adjoint().triangularView<Eigen::Upper>().solveInPlace(B);
-    return B;
-  };
-
-  inline auto logDet(const Eigen::MatrixXd &A) -> double {
-    auto L = chol_lower(A);
-    return 2.0 * L.diagonal().array().log().sum();
-  }
-
   /// @brief auxiliary variable for recursive update
-  Eigen::VectorXd eta_0;
-  Eigen::MatrixXd Lambda_0;
+
+  Eigen::VectorXd eta_0;    // natural mean
+  Eigen::MatrixXd Lambda_0; // natural precision matrix
+  double elbo_0;
+  Eigen::VectorXd elbo_dot_0;
 
   std::vector<Eigen::VectorXd>
       eta_dot_0; // auxiliary variable for recursive update
   std::vector<Eigen::MatrixXd>
       Lambda_dot_0; // auxiliary variable for recursive update
 
-  double elbo_0;
-  Eigen::VectorXd elbo_dot_0;
-
   size_t batch_count = 0;
   bool recursive_initialized = false;
+
+  double novelty_threshold;
 
   // ADAM optimizer for hyperparameter optimization
   std::unique_ptr<AdamOptimizer> adam_optimizer;

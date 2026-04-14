@@ -171,7 +171,7 @@ def main():
     # 采用 NuSVR: nu 参数即可预先决定支持向量的比例 (0 < nu <= 1)。这里设置 nu=0.5 意味着大约有 50% 的训练样本会成为支持向量。
     print("Training Support Vector Machine (NuSVR)...")
     nu = min(50 / len(X_U_scaled), 1.0)  # Limit to 50 support vectors
-    svr = NuSVR(nu=0.2, C=1.0, kernel='rbf')
+    svr = NuSVR(nu=0.5, C=1.0, kernel='rbf')
     model = MultiOutputRegressor(svr)
     model.fit(X_U_scaled, X_dyn_dot)
     print("Training finished.")

@@ -260,7 +260,7 @@ int main(int argc, char const *argv[]) {
         NonlinearSystem gp_system(basis, init_params, state_sym, control_sym);
 
         std::string file_prefix =
-            experiment_name + "_DE_RandomID=" + std::to_string(run_id);
+            experiment_name + "_" + algorithms[algorithm_id] +"_RandomID=" + std::to_string(run_id);
         SparseGPParameterEstimator gp_est(&gp_system, dt, clusters, max_iters,
                                           downsample_rate,
                                           algorithms[algorithm_id], file_prefix);
