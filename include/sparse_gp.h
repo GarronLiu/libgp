@@ -23,6 +23,8 @@
 #include <Eigen/Dense>
 #include <cmath>
 
+#define jitter 1e-6
+
 namespace libgp {
 // inline Cholesky helpers to simplify repeated patterns below
 inline auto chol_lower(const Eigen::MatrixXd &A) -> Eigen::MatrixXd {
@@ -30,7 +32,7 @@ inline auto chol_lower(const Eigen::MatrixXd &A) -> Eigen::MatrixXd {
 };
 
 inline auto chol_inverse(const Eigen::MatrixXd &A) -> Eigen::MatrixXd {
-  auto A_jitter = A + Eigen::MatrixXd::Identity(A.rows(), A.cols()) * 1e-8;
+  auto A_jitter = A + Eigen::MatrixXd::Identity(A.rows(), A.cols()) * jitter;
   Eigen::MatrixXd L = chol_lower(A_jitter);
   Eigen::MatrixXd inv = Eigen::MatrixXd::Identity(L.rows(), L.cols());
   L.triangularView<Eigen::Lower>().solveInPlace(inv);
@@ -43,7 +45,7 @@ inline decltype(auto) chol_solve(const Eigen::MatrixXd &A, Eigen::MatrixXd B) {
   if (B.rows() != A.cols())
     throw std::invalid_argument("Incompatible matrix dimensions");
   auto X = B;
-  auto A_jitter = A + Eigen::MatrixXd::Identity(A.rows(), A.cols()) * 1e-8;
+  auto A_jitter = A + Eigen::MatrixXd::Identity(A.rows(), A.cols()) * jitter;
   Eigen::MatrixXd L = chol_lower(A_jitter);
   L.triangularView<Eigen::Lower>().solveInPlace(X);
   L.adjoint().triangularView<Eigen::Upper>().solveInPlace(X);
@@ -51,7 +53,7 @@ inline decltype(auto) chol_solve(const Eigen::MatrixXd &A, Eigen::MatrixXd B) {
 };
 
 inline auto logDet(const Eigen::MatrixXd &A) -> double {
-  auto A_jitter = A + Eigen::MatrixXd::Identity(A.rows(), A.cols()) * 1e-8;
+  auto A_jitter = A + Eigen::MatrixXd::Identity(A.rows(), A.cols()) * jitter;
   auto L = chol_lower(A_jitter);
   return 2.0 * L.diagonal().array().log().sum();
 };
@@ -123,9 +125,9 @@ public:
 
   void exportModelToYAML(const char *filename);
 
-  void add_pattern_batch(const Eigen::VectorXd &x, double y);
+  void storePosteriorPretrained();
 
-  void check_gradient();
+  void add_pattern_batch(const Eigen::VectorXd &x, double y);
 
 protected:
   Eigen::VectorXd alpha_R;
@@ -155,8 +157,9 @@ protected:
   Eigen::MatrixXd cov_inducing;
 
   // variables related to pretrained posterior
-  bool stream_update_flag =
-      false; // whether to use pretrained posterior for warm start
+  bool stream_update_mode =
+      false; // training with streaming batch set from pretrained posterior or
+             // sample set from zero prior
   Eigen::MatrixXd inv_K_aa_pre, K_aa_pre;
   Eigen::MatrixXd inv_Sigma_u_pre, Sigma_u_pre;
   Eigen::MatrixXd P_pre, invP_pre;
@@ -164,14 +167,18 @@ protected:
   Eigen::VectorXd y_a;       // history pseudo observations
   double elbo_constant_init; // constant term in ELBO that does not depend on
                              // new batch
-
-  bool pretrained_stored = false;
-
-  void storePosteriorPretrained();
+  bool llm_calculatable_flag =
+      false; // whether the log likelihood can be calculated (depends on whether
+             // the pretrained posterior is available and compatible with
+             // current inducing points)
 
   void addNewInducingPoints(Eigen::VectorXd x_t);
 
   double novelty_threshold;
+
+  bool invKRR_add_inducing_need_update = false;
+
+  Eigen::MatrixXd invK_RR_online;
 
   Eigen::MatrixXd
       U; // U = L_K_RR^{-1} * K_RX; U^T * U = K_XR * K_RR^(-1) * K_RX
@@ -184,11 +191,12 @@ protected:
 
   void compute() override;
 
-  SampleSet *inducingset;     // full training set for sparse GP
-  SampleSet *inducingset_pre; // inducing points of pretrained model
-  SampleSet *batchset;        // new training points in the current batch
+  SampleSet *inducingset = NULL;     // full training set for sparse GP
+  SampleSet *inducingset_pre = NULL; // inducing points of pretrained model
+  SampleSet *batchset = NULL;        // new training points in the current batch
 
-  size_t iterations = 0; // number of batch updates performed, used for learning rate scheduling
+  size_t iterations =
+      0; // number of batch updates performed, used for learning rate scheduling
 };
 } // namespace libgp
 

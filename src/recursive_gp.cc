@@ -559,7 +559,7 @@ std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
   size_t param_dim =
       cf->get_param_dim() + m * input_dim; // 超参数维度 + 诱导点位置维度
   if (!adam_optimizer) {
-    adam_optimizer.reset(new AdamOptimizer(param_dim, 0.002));
+    adam_optimizer.reset(new AdamOptimizer(param_dim, 0.001));
   }
 
   size_t max_batches = (n + batch_size - 1) / batch_size;
@@ -594,7 +594,7 @@ std::vector<double> RecursiveGaussianProcess::epochUpdate(bool verbose) {
       Eigen::VectorXd params = get_hyperparameters();
 
       bool converged = adam_optimizer->step(elbo_dot_0, params);
-      // update_hyperparameters(params);
+      update_hyperparameters(params);
       epoch_lml.push_back(elbo_0);
       if (converged) {
         std::cout << "Optimization converged at iteration "

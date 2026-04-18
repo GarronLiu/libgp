@@ -75,8 +75,7 @@ int main(int argc, char const *argv[]) {
   sgp.specify_inducingSet(inducing_points);
 
   size_t epoch = 0;
-  libgp::CG cg_sgp; // 差分演化优化器
-  libgp::GA ga_sgp; //遗传算法优化器
+  libgp::CG optimizer; // 差分演化优化器
   size_t max_epochs = 10;
   std::vector<double> rmse(2), lml(2), mae(2), duration(2);
 
@@ -85,7 +84,7 @@ int main(int argc, char const *argv[]) {
   evaluator.setTrainSet(train_set);
   evaluator.setTestSet(test_set_ptr);
 
-  cg_sgp.maximize(&sgp, 100, 1);
+  optimizer.maximize(&sgp, 100, 1);
   // sgp.check_gradient();
 
   while (epoch < max_epochs) {
@@ -104,39 +103,49 @@ int main(int argc, char const *argv[]) {
     sgp.exportModelToYAML("sgp_model.yaml");
     SparseGaussianProcess rgp("sgp_model.yaml");
     epoch_t1 = std::chrono::high_resolution_clock::now();
-    // rgp.epochUpdate(false);
+
     epoch_t2 = std::chrono::high_resolution_clock::now();
     duration[2] =
         std::chrono::duration<double, std::milli>(epoch_t2 - epoch_t1).count();
     Eigen::VectorXd mean_rgp, var_rgp;
     std::cout << "begin batch update" << std::endl;
-    for (size_t i = 1500; i < test_set_ptr->size(); ++i) {
+    rgp.storePosteriorPretrained();
+    for (size_t i = 1000; i < 1400; ++i) {
       // rgp.sampleset->add(test_set_ptr->x(i), test_set_ptr->y(i) +
       // Utils::randn() * 0.2);
 
       rgp.add_pattern_batch(test_set_ptr->x(i),
                             test_set_ptr->y(i) + Utils::randn() * 0.2);
     }
-    std::cout << "begin epoch update" << std::endl;
-    // auto elbo_curve = rgp.epochUpdate();
-    // plt::figure();
-    // plt::plot(elbo_curve);
-    // plt::title("ELBO Curve (RGP)");
-    // plt::xlabel("Epoch");
-    // plt::ylabel("ELBO");
-    // plt::show();
+
+    auto tick = std::chrono::high_resolution_clock::now();
+    optimizer.maximize(&rgp, 100, 1);
+    auto tock = std::chrono::high_resolution_clock::now();
+    double optimization_time =
+        std::chrono::duration<double, std::milli>(tock - tick).count();
+    std::cout << "Optimization time (RGP): " << optimization_time << " ms"
+              << std::endl;
+    duration[2] += optimization_time;
 
     // check gradient
-    
     // rgp.check_gradient();
-    cg_sgp.maximize(&rgp, 100, 1);
 
+    rgp.exportModelToYAML("rgp_model.yaml");
+
+    rgp.storePosteriorPretrained();
+    for (size_t i = 1500; i < test_set_ptr->size(); ++i) {
+      rgp.add_pattern_batch(test_set_ptr->x(i),
+                            test_set_ptr->y(i) + Utils::randn() * 0.2);
+    }
+
+    rgp.check_gradient();
+
+    optimizer.maximize(&rgp, 100, 1);
 
     rgp.pred_diag(test_set_ptr, mean_rgp, var_rgp);
 
     evaluator.record_epoch_results("RSVGP", mean_rgp, var_rgp,
                                    rgp.log_likelihood(), duration[2], verbose);
-    // rgp.sampleset->clear();
 
     //可视化rgp新的诱导点
     Eigen::MatrixXd inducing_points_rgp = rgp.getFlatInputs();

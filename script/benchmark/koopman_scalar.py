@@ -127,13 +127,21 @@ def main():
     for i in range(X_dyn.shape[1]):
         X_dyn_dot[:, i] = np.gradient(X_dyn[:, i], time)
     
-    # Check for NaNs or Infs that could cause SVD to fail
-    mask = ~np.isnan(X_dyn_dot).any(axis=1) & ~np.isinf(X_dyn_dot).any(axis=1)
-    X_dyn = X_dyn[mask]
-    U = U[mask]
-    X_full = X_full[mask]
-    time = time[mask]
-    X_dyn_dot = X_dyn_dot[mask]
+    # 检查 NaN 或 Inf，如果有则用前后两帧均值填充
+    for i in range(X_dyn_dot.shape[1]):
+        for j in range(X_dyn_dot.shape[0]):
+            if np.isnan(X_dyn_dot[j, i]) or np.isinf(X_dyn_dot[j, i]):
+                # 找到前后有效值
+                prev_idx = j - 1 if j - 1 >= 0 else j
+                next_idx = j + 1 if j + 1 < X_dyn_dot.shape[0] else j
+                # 向前找最近的有效值
+                while prev_idx > 0 and (np.isnan(X_dyn_dot[prev_idx, i]) or np.isinf(X_dyn_dot[prev_idx, i])):
+                    prev_idx -= 1
+                # 向后找最近的有效值
+                while next_idx < X_dyn_dot.shape[0] - 1 and (np.isnan(X_dyn_dot[next_idx, i]) or np.isinf(X_dyn_dot[next_idx, i])):
+                    next_idx += 1
+                # 取均值填充
+                X_dyn_dot[j, i] = 0.5 * (X_dyn_dot[prev_idx, i] + X_dyn_dot[next_idx, i])
 
     if parser.parse_args().verbose:
         plt.figure(figsize=(12, 4))

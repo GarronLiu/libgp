@@ -9,7 +9,7 @@ import math
 from tf.transformations import euler_from_quaternion
 
 # 设置输入和输出文件路径
-bag_prefix = "z_maneuver_10deg_2"
+bag_prefix = "8mUSV_ZigZag20deg-20deg"
 bag_file = "dataset/rosbag/" + bag_prefix + ".bag"
 csv_dir = "dataset/rosbag/" + bag_prefix + ".csv"  # 输出CSV文件路径
 
@@ -146,6 +146,13 @@ res_y = f_y(sample_times)
 res_psi = f_psi(sample_times)
 res_th_left = f_th_left(sample_times)
 res_th_right = f_th_right(sample_times)
+
+#对 u，v，r 进行平滑处理（可选）
+window_size = 20  # 平滑窗口大小
+res_u = np.convolve(res_u, np.ones(window_size) / window_size, mode="same")
+res_v = np.convolve(res_v, np.ones(window_size) / window_size, mode="same")
+res_r = np.convolve(res_r, np.ones(window_size) / window_size, mode="same")
+
 
 # ---------------- 组合数据并保存 ----------------
 

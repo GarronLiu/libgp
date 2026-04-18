@@ -26,14 +26,16 @@ def calculate_metrics(true_df, pred_df, states):
     return rmse, mae
 
 def main():
-    base_dir = "result/8mUSV/"
-    true_filepath = os.path.join(base_dir, "8mUSV_TrainingSet_Smoothed.csv")
+    base_dir = "result/Zig_zag_benchmark/"
+    true_filepath = os.path.join(base_dir, "TrainingSet_Smoothed.csv")
     
     if not os.path.exists(true_filepath):
         print(f"True dataset file not found: {true_filepath}")
         return
         
     true_df = pd.read_csv(true_filepath)
+    if 'time' in true_df.columns:
+            true_df = true_df[~true_df['time'].duplicated(keep='first')]
     states_to_eval = [0, 1, 2, 3, 4, 5]
     state_names = ["x(m)", "y(m)", "psi(deg)", "u(m/s)", "v(m/s)", "r(deg/s)"]
     
@@ -43,9 +45,12 @@ def main():
     sgp_runs = []
     
     for i in range(10):
-        pred_filepath = os.path.join(base_dir, f"8mUSV_DE_RandomID={i}_TrainingSet_prediction.csv")
+        pred_filepath = os.path.join(base_dir, f"KVLCC2_ZigZag_DE_RandomID={i}_TrainingSet_prediction.csv")
         if os.path.exists(pred_filepath):
             pred_df = pd.read_csv(pred_filepath)
+            # 剔除 time 轴重复的行，只保留第一次出现
+            if 'time' in pred_df.columns:
+                pred_df = pred_df[~pred_df['time'].duplicated(keep='first')]
             rmse_dict, mae_dict = calculate_metrics(true_df, pred_df, states_to_eval)
             sgp_runs.append({
                 'id': i,
@@ -84,16 +89,23 @@ def main():
     
     # 2. 评估 Koopman
     kpm_rmse, kpm_mae = {}, {}
-    kpm_filepath = os.path.join(base_dir, "8mUSV_KPM_TrainingSet_prediction.csv")
+    kpm_filepath = os.path.join(base_dir, "KVLCC2_ZigZag_KPM_TrainingSet_prediction.csv")
     if os.path.exists(kpm_filepath):
         kpm_df = pd.read_csv(kpm_filepath)
+        # 剔除 time 轴重复的行，只保留第一次出现
+        if 'time' in kpm_df.columns:
+            kpm_df = kpm_df[~kpm_df['time'].duplicated(keep='first')]
         kpm_rmse, kpm_mae = calculate_metrics(true_df, kpm_df, states_to_eval)
         
     # 3. 评估 NuSVR
     svr_rmse, svr_mae = {}, {}
-    svr_filepath = os.path.join(base_dir, "8mUSV_NuSVR_TrainingSet_prediction.csv")
+    svr_filepath = os.path.join(base_dir, "KVLCC2_ZigZag_NuSVR_TrainingSet_prediction.csv")
+    
     if os.path.exists(svr_filepath):
         svr_df = pd.read_csv(svr_filepath)
+        # 剔除 time 轴重复的行，只保留第一次出现
+        if 'time' in svr_df.columns:
+            svr_df = svr_df[~svr_df['time'].duplicated(keep='first')]
         svr_rmse, svr_mae = calculate_metrics(true_df, svr_df, states_to_eval)
 
     # 打印 RMSE 表格

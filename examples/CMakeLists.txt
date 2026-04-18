@@ -41,9 +41,6 @@ include_directories(
 add_executable(casadi_example casadi_example.cc)
 target_link_libraries(casadi_example gp ${Python3_LIBRARIES} casadi::casadi)
 
-add_executable(maneuvering_example_KVLCC2_algorithms maneuvering_example_KVLCC2_algorithms.cc)
-target_link_libraries(maneuvering_example_KVLCC2_algorithms gp ${Python3_LIBRARIES} casadi::casadi)
-
 add_executable(test_recursive test/test_recursive_pretrain.cc)
 target_link_libraries(test_recursive gp ${Python3_LIBRARIES} casadi::casadi)
 
@@ -57,6 +54,13 @@ SET(MANEUVER_DEPS
 include_directories(
         deps
 )
+
+add_executable(maneuvering_example_KVLCC2_algorithms maneuvering_example_KVLCC2_algorithms.cc)
+target_link_libraries(maneuvering_example_KVLCC2_algorithms gp ${Python3_LIBRARIES} casadi::casadi)
+
+add_executable(maneuvering_example_KVLCC2_cluster maneuvering_example_KVLCC2_cluster.cc)
+target_link_libraries(maneuvering_example_KVLCC2_cluster gp ${Python3_LIBRARIES} casadi::casadi)
+
 add_executable(maneuvering_example_KVLCC2_zig_zag maneuvering_example_KVLCC2_zig_zag.cc )
 target_link_libraries(maneuvering_example_KVLCC2_zig_zag gp ${Python3_LIBRARIES} casadi::casadi)
 

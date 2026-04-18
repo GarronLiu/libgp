@@ -59,6 +59,9 @@ SparseGaussianProcess::SparseGaussianProcess(size_t input_dim,
     inducingset->add(x, 0);
   }
   L_K_RR.resize(inducingSet_size, inducingSet_size);
+
+  // 初始化在线数据集
+  batchset = new SampleSet(input_dim);
 }
 
 SparseGaussianProcess::SparseGaussianProcess(const char *filename) {
@@ -269,10 +272,13 @@ void SparseGaussianProcess::compute() {
 
   if (!cf->loghyper_changed)
     return;
-  cf->loghyper_changed = false;
 
-  if (stream_update_flag) {
+  if (inducingset->empty())
+    return;
 
+  if (stream_update_mode) {
+    if (batchset->empty())
+      return;
     size_t param_dim = cf->get_param_dim();
     size_t m_a = inducingset_pre->size();
     size_t m = inducingset->size();
@@ -375,6 +381,8 @@ void SparseGaussianProcess::compute() {
     }
 
   } else {
+    if (sampleset->empty())
+      return;
     size_t m = inducingset->size();
     size_t n = sampleset->size();
 
@@ -449,6 +457,9 @@ void SparseGaussianProcess::compute() {
       inducingset->set_y(i, mean_inducing(i));
     }
   }
+
+  cf->loghyper_changed = false;
+  llm_calculatable_flag = true;
   alpha_needs_update = true;
 }
 
@@ -466,7 +477,7 @@ void SparseGaussianProcess::update_alpha() {
   alpha_needs_update = false;
   size_t m = inducingset->size();
 
-  if (stream_update_flag) {
+  if (stream_update_mode) {
     size_t m_a = inducingset_pre->size();
 
     Eigen::MatrixXd L_K_RR_T = L_K_RR.transpose();
@@ -629,8 +640,15 @@ void SparseGaussianProcess::specify_inducingSet(
 double SparseGaussianProcess::log_likelihood() {
   compute();
 
-  if (stream_update_flag) {
-    /// TODO:
+  if (!llm_calculatable_flag) {
+    std::cerr << "Error: log-likelihood not calculatable. Please check if the "
+                 "model is properly initialized and trained."
+              << std::endl;
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+
+  if (stream_update_mode) {
+
     size_t b = batchset->size();
     size_t m_a = inducingset_pre->size();
 
@@ -694,7 +712,7 @@ Eigen::VectorXd SparseGaussianProcess::log_likelihood_gradient() {
   Eigen::VectorXd grad(grad_dim);
   grad.setZero();
 
-  if (stream_update_flag) {
+  if (stream_update_mode) {
     /// TODO:
     size_t b = batchset->size();
     size_t m_a = inducingset_pre->size();
@@ -860,6 +878,9 @@ Eigen::VectorXd SparseGaussianProcess::log_likelihood_gradient() {
     grad[cf->get_param_dim() - 1] -=
         (1 - param_alpha) / param_alpha * static_cast<double>(b) * 2.0;
 
+    // 如果不更新原来的诱导点位置
+    grad.segment(cf->get_param_dim(), m_a * input_dim).setZero();
+
     return -0.5 * grad;
   } else {
     // W = K_XX_bar^(-1) - K_XX_bar^(-1) * y * y^T * K_XX_bar^(-1)
@@ -945,57 +966,11 @@ Eigen::VectorXd SparseGaussianProcess::log_likelihood_gradient() {
 
     grad[cf->get_param_dim() - 1] += (1 - param_alpha) / param_alpha * n;
 
+    if(input_dim > 1){
+      grad.segment(cf->get_param_dim(), m * input_dim).setZero(); // not updating inducing point locations
+    }
+
     return grad;
-  }
-}
-
-void SparseGaussianProcess::check_gradient() {
-  Eigen::VectorXd analytic_grad = log_likelihood_gradient(); // 您的解析梯度
-
-  double epsilon = 1e-5; // 小扰动
-  // 对每个参数进行数值梯度计算
-  Eigen::VectorXd params = get_hyperparameters();
-  Eigen::VectorXd numeric_grad(params.size());
-
-  for (int i = 0; i < params.size(); ++i) {
-    double original = params(i);
-
-    // 前向扰动
-    params(i) = original + epsilon;
-    update_hyperparameters(params);
-    double f_plus = log_likelihood(); // 需要实现
-
-    // 后向扰动
-    params(i) = original - epsilon;
-    update_hyperparameters(params);
-    double f_minus = log_likelihood();
-
-    // 中心差分
-    numeric_grad(i) = (f_plus - f_minus) / (2 * epsilon);
-
-    // 恢复参数
-    params(i) = original;
-  }
-
-  update_hyperparameters(params); // 恢复原始参数
-
-  // 比较解析梯度和数值梯度
-  double rel_error = (analytic_grad - numeric_grad).norm() /
-                     (analytic_grad.norm() + numeric_grad.norm() + 1e-8);
-
-  std::cout << "相对误差: " << rel_error << std::endl;
-  if (rel_error > 1e-4) {
-    std::cout << "梯度可能存在错误！" << std::endl;
-  }
-
-  // 逐项显示误差
-  std::cout << "参数\t解析梯度\t数值梯度\t绝对误差\t相对误差" << std::endl;
-  for (int i = 0; i < params.size(); ++i) {
-    double abs_err = std::abs(analytic_grad(i) - numeric_grad(i));
-    double rel_err = abs_err / (std::abs(analytic_grad(i)) +
-                                std::abs(numeric_grad(i)) + 1e-12);
-    std::cout << i << "\t" << analytic_grad(i) << "\t" << numeric_grad(i)
-              << "\t" << abs_err << "\t" << rel_err << std::endl;
   }
 }
 
@@ -1016,40 +991,66 @@ void SparseGaussianProcess::add_pattern_batch(const Eigen::VectorXd &x,
   size_t input_dim = x.size();
   assert(input_dim == this->input_dim);
 
-  static bool batch_initialized = false;
-  if (!batch_initialized) {
-    batchset = new SampleSet(input_dim);
-    batch_initialized = true;
+  if (batchset == NULL) {
+    std::cerr << "Error: batchset is not initialized. Call "
+                 "storePosteriorPretrained() "
+                 "before adding new patterns in online phase."
+              << std::endl;
+    return;
   }
   batchset->add(x.data(), y);
-  stream_update_flag = true;
-  cf->loghyper_changed = true; // trigger recomputation in compute()
 
-  if (!pretrained_stored) {
-    storePosteriorPretrained(); // 保存预训练模型的相关参数
-    pretrained_stored = true;
-  }
   addNewInducingPoints(x);
+
+  cf->loghyper_changed = true; // trigger recomputation in compute()
 }
 
+// 在预训练阶段结束后，添加在线数据前调用，主要将预训练阶段的诱导点和相关矩阵保存下来，以便在线更新时使用
 void SparseGaussianProcess::storePosteriorPretrained() {
-  inducingset_pre = new SampleSet(static_cast<int>(get_input_dim()));
+
+  compute();
+  update_alpha(); // in case that alpha and cov_inducing are not updated before
+                  // this function is called
+
+  // initialization for next online update phase
+  if (inducingset_pre == NULL) {
+    inducingset_pre = new SampleSet(static_cast<int>(get_input_dim()));
+  } else {
+    inducingset_pre->clear();
+  }
   for (size_t i = 0; i < inducingset->size(); i++) {
     inducingset_pre->add(inducingset->x(i), inducingset->y(i));
+  }
+  std::cout << "Stored " << inducingset_pre->size()
+            << " inducing points from pretraining phase." << std::endl;
+
+  if (batchset == NULL) {
+    batchset = new SampleSet(static_cast<int>(get_input_dim()));
+  } else {
+    for (size_t i = 0; i < batchset->size(); i++) {
+      sampleset->add(batchset->x(i), batchset->y(i));
+    }
+    batchset->clear();
   }
 
   size_t m_a = inducingset_pre->size();
 
+  // calculate K_aa_pre and its inverse for the pre-trained inducing points
   double noise_variance =
       std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2);
   Eigen::MatrixXd K_aa(m_a, m_a);
   computeKernelMatrixLowerHalf(K_aa, inducingset_pre, cf);
-  K_aa.diagonal().array() -= noise_variance + 1e-6; // subtract noise variance
-  K_aa_pre = K_aa.selfadjointView<Eigen::Lower>();  // ensure K_aa_pre is lower
-                                                    // triangular
-  inv_K_aa_pre = chol_inverse(K_aa);
+  K_aa.diagonal().array() -= noise_variance; // subtract noise variance
+  K_aa_pre.resize(m_a, m_a);
+  K_aa_pre = K_aa.selfadjointView<Eigen::Lower>(); // ensure K_aa_pre is lower
+                                                   // triangular
+
+  inv_K_aa_pre.resize(m_a, m_a);
+  inv_K_aa_pre = chol_inverse(K_aa_pre);
+
+  Sigma_u_pre.resize(m_a, m_a);
   Sigma_u_pre = cov_inducing;
-  inv_Sigma_u_pre = chol_inverse(cov_inducing);
+  inv_Sigma_u_pre = chol_inverse(Sigma_u_pre);
 
   invP_pre = inv_Sigma_u_pre - inv_K_aa_pre; // inv(P_pre)
   P_pre = chol_inverse(invP_pre);
@@ -1068,41 +1069,56 @@ void SparseGaussianProcess::storePosteriorPretrained() {
                   inv_Sigma_u_pre_mean_a)); // constant w.r.t. new batch
   elbo_constant_init -=
       1 / param_alpha * logDet(P_pre); // constant w.r.t. new batch
+
+  // reset novelty threshold for adding new inducing points in online phase
+  Eigen::VectorXd gamma_values = inv_K_aa_pre.diagonal();
+  gamma_values = gamma_values.array().inverse(); // gamma = 1 / diag(inv(K_RR))
+  novelty_threshold = (gamma_values.maxCoeff() + gamma_values.minCoeff()) * 0.0005;
+  // novelty_threshold = 0.05 * std::exp(cf->get_loghyper()(cf->get_param_dim() - 2) *
+  //                     2.0); //使用signal_variance的1/5作为阈值
+  // change flags
+  invKRR_add_inducing_need_update = true;
+  stream_update_mode = true;
+
+  std::cout << "Stored posterior from pretraining phase. Ready for online updates."
+            << std::endl;
 }
 
 void SparseGaussianProcess::addNewInducingPoints(Eigen::VectorXd x_t) {
   size_t m = inducingset->size();
 
-  static double novelty_threshold =
-      0.05 * std::exp(cf->get_loghyper()(cf->get_param_dim() - 2) *
-                      2.0); //使用signal_variance的1/5作为阈值
-  Eigen::MatrixXd K_RR(m, m);
-  computeKernelMatrixLowerHalf(K_RR, inducingset, cf);
-  static double noise_variance =
+  if (invKRR_add_inducing_need_update) {
+    invK_RR_online = inv_K_aa_pre;
+    invKRR_add_inducing_need_update = false;
+  }
+
+  double noise_variance =
       std::exp(cf->get_loghyper()(cf->get_param_dim() - 1) * 2.0);
-  static auto invK_RR = chol_inverse(K_RR);
+
   //计算novelty：gama = K_tt-K_tr * inv(K_rr) * K_rt
   Eigen::VectorXd k_rt(m);
   for (size_t j = 0; j < m; j++) {
     k_rt(j) = cf->get(x_t, inducingset->x(j));
   }
-  Eigen::VectorXd v = invK_RR * k_rt;
+
+  Eigen::VectorXd v = invK_RR_online * k_rt;
   double k_tt = cf->get(x_t, x_t) - noise_variance;
   double gamma = k_tt - v.dot(k_rt.transpose());
-  // std::cout << "Novelty (gamma) for sample " << i << ": " << gamma <<
-  // std::endl;
+
   if (gamma > novelty_threshold) {
     inducingset->add(x_t, 0.0);
     //通过分块矩阵拓展的方式更新inv(K_RR)
     size_t new_m = inducingset->size();
-    invK_RR.conservativeResize(new_m, new_m);
+    invK_RR_online.conservativeResize(new_m, new_m);
     double alpha = 1.0 / gamma;
-    invK_RR.block(0, 0, m, m) += alpha * v * v.transpose();
-    invK_RR.block(m, 0, 1, m) = -alpha * v.transpose();
-    invK_RR.block(0, m, m, 1) = -alpha * v;
-    invK_RR(m, m) = alpha;
+    invK_RR_online.block(0, 0, m, m) += alpha * v * v.transpose();
+    invK_RR_online.block(m, 0, 1, m) = -alpha * v.transpose();
+    invK_RR_online.block(0, m, m, 1) = -alpha * v;
+    invK_RR_online(m, m) = alpha;
     m = new_m;
+
   }
+
 }
 
 Eigen::VectorXd SparseGaussianProcess::get_hyperparameter_lower_bound() {
@@ -1112,7 +1128,7 @@ Eigen::VectorXd SparseGaussianProcess::get_hyperparameter_lower_bound() {
   lb.head(cf->get_param_dim()) = cf->get_loghyper_lb();
   for (size_t i = 0; i < m; ++i) {
     lb.segment(cf->get_param_dim() + i * input_dim, input_dim) =
-        inducingset->x(i) - 0.5 * Eigen::VectorXd::Ones(input_dim);
+        inducingset->x(i) - 1.0 * Eigen::VectorXd::Ones(input_dim);
   }
   return lb;
 }

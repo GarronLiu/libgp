@@ -4,6 +4,8 @@ import pandas as pd
 
 import matplotlib.pyplot as plt
 
+import utils
+
 # 配置参数
 base_dir = "result/convergence_analysis_algorithms"
 algorithms = ["CG", "DE", "GA", "PSO"]
@@ -21,14 +23,15 @@ if save_fig and not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
 
 def plot_lml_convergence(title):
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    fig.suptitle(title, fontsize=16)
+    utils.setup_matplotlib_style(single_column=False, figure_height=5)
+    fig, axes = plt.subplots(1, 3)
 
     for idx, state_id in enumerate(states):
         ax = axes[idx]
         ax.set_title(f'State {state_id} Convergence')
         ax.set_xlabel('Generation ID')
-        ax.set_ylabel('LML')
+
+        ax2 = ax.twinx()
 
         for algo in algorithms:
             all_lml = []
@@ -36,23 +39,26 @@ def plot_lml_convergence(title):
             
             # Read all runs for the current algorithm and state
             runs_data = []
+            runs_time_data = []
             for run_id in range(max_run_id + 1):
-                filename = f"{algo}_RunID={run_id}_State_{state_id}_LML_TimeCost_LML_TimeCost.csv"
+                filename = f"KVLCC2_Algorithms_{algo}_RandomID={run_id}_State_{state_id}_LML_TimeCost.csv"
                 filepath = os.path.join(base_dir, filename)
                 
                 if os.path.exists(filepath):
                     df = pd.read_csv(filepath)
                     runs_data.append(df['LML'].values)
+                    runs_time_data.append(df['TimeCost'].values)
                     max_len = max(max_len, len(df))
                 else:
                     print(f"Warning: File not found {filepath}")
             
-            if not runs_data:
+            if not runs_data or not runs_time_data:
                 continue
                 
             # Pad sequences with their last value to make them the same length
             # Some algorithms might converge earlier 
             padded_runs = []
+            
             for run in runs_data:
                 if len(run) < max_len:
                     padded = np.pad(run, (0, max_len - len(run)), mode='edge')
@@ -61,24 +67,54 @@ def plot_lml_convergence(title):
                     padded_runs.append(run)
             
             padded_runs = np.array(padded_runs)
+
+            padded_times = []
+            for run_time in runs_time_data:
+                if len(run_time) < max_len:
+                    padded_time = np.pad(run_time, (0, max_len - len(run_time)), mode='edge')
+                    padded_times.append(padded_time)
+                else:
+                    padded_times.append(run_time)
+            padded_times = np.array(padded_times)
             
             # Calculate mean and bounds (e.g., standard deviation or min/max)
             mean_lml = np.mean(padded_runs, axis=0)
             std_lml = np.std(padded_runs, axis=0)
+
+            mean_cost = np.mean(padded_times, axis=0)
+            std_cost = np.std(padded_times, axis=0)
             
             generations = np.arange(1, max_len + 1)
             
             # Plot the mean line and the shaded area
-            ax.plot(generations, mean_lml, color=colors[algo], label=algo, linewidth=2)
+            ax.plot(generations, mean_lml, color=colors[algo], label=f"{algo} LML")
             ax.fill_between(generations, mean_lml - std_lml, mean_lml + std_lml, 
                              color=colors[algo], alpha=0.2)
+            ax2.plot(generations, mean_cost, color=colors[algo],label=f"{algo} Time Cost", linestyle=':', alpha=0.7)
+            ax2.fill_between(generations, mean_cost - std_cost, mean_cost + std_cost, 
+                        color=colors[algo], alpha=0.08)
+            
+            # ax2.tick_params(axis='y')
         
-        state_names = {3: ' longitudinal velocity (u)', 4: ' sway velocity (v)', 5: ' yaw rate (r)'}
-        ax.set_title(f'LML Convergence vs Generation (State {state_id}:{state_names.get(state_id, "")})')
-        ax.set_xlabel('Generation ID')
-        ax.set_ylabel('Log Marginal Likelihood (LML)')
-        ax.legend()
-        ax.grid(True, linestyle='--', alpha=0.7)
+        state_names = {3: '(a)', 4: '(b)', 5: '(c)'}
+        ax.set_title(f'{state_names.get(state_id, "")}',fontweight='bold')
+        ax.set_xlabel('Iterations')
+        if idx == 0:
+            ax.set_ylabel('Log Marginal Likelihood (LML)')
+            # 只在最右侧显示y轴刻度数值
+        if idx != 0:
+            ax.set_yticklabels([])
+        if idx != 2:
+            ax2.set_yticklabels([])
+        
+        if idx == 2:
+            ax.legend(loc='lower right', ncol=1, frameon=True)
+            ax2.set_ylabel('Time per Iteration (ms)')
+
+        # 设置统一的y轴范围
+        ax.set_ylim(-500, 3500)
+        ax2.set_ylim(0, 200)
+        # 在右轴绘制每一次迭代的时间耗费             
 
     plt.tight_layout()
     plt.subplots_adjust(top=0.88)
@@ -89,7 +125,7 @@ def plot_lml_convergence(title):
         print(f"Figure saved to {save_path}")
 
 def plot_accuracy_comparison(title):
-
+    
     # 读取原始的真实数据集
     true_train_filepath = os.path.join(base_dir, "TrainingSet_wo_noise.csv")
     true_test_filepath = os.path.join(base_dir, "TestSet.csv")
@@ -115,8 +151,8 @@ def plot_accuracy_comparison(title):
         train_mae_list, test_mae_list = [], []
 
         for run_id in range(max_run_id + 1):
-            train_filename = f"{algo}_RunID={run_id}_TrainingSet_prediction.csv"
-            test_filename = f"{algo}_RunID={run_id}_TestSet_prediction.csv"
+            train_filename = f"KVLCC2_Algorithms_{algo}_RandomID={run_id}_TrainingSet_prediction.csv"
+            test_filename = f"KVLCC2_Algorithms_{algo}_RandomID={run_id}_TestSet_prediction.csv"
 
             train_filepath = os.path.join(base_dir, train_filename)
             test_filepath = os.path.join(base_dir, test_filename)
@@ -166,11 +202,11 @@ def plot_accuracy_comparison(title):
             results[metric_name][algo][:, 2] *= rad_to_deg
             results[metric_name][algo][:, 5] *= rad_to_deg
 
-    fig, axes = plt.subplots(2, 6, figsize=(24, 8))
-    fig.suptitle(title, fontsize=16)
+    utils.setup_matplotlib_style(single_column=False, figure_height=8)
+    fig, axes = plt.subplots(2, 6)
 
     label_list = ["x(m)", "y(m)", "$\\psi$(deg)", "u(m/s)", "v(m/s)", "r(deg/s)"]
-    metrics_rows = [('Train RMSE', 'RMSE on Training Dataset'), ('Test RMSE', 'RMSE on Test Dataset')]
+    metrics_rows = [('Train RMSE', '(a)'), ('Test RMSE', '(b)')]
     
     for row, (metric_name, row_title) in enumerate(metrics_rows):
         for state_idx in range(6):
@@ -188,18 +224,18 @@ def plot_accuracy_comparison(title):
                             line.set_color(colors[algo])
             
             ax.set_xticks(np.arange(len(algorithms)))
-            ax.set_xticklabels(algorithms)
-            ax.set_title(f'{label_list[state_idx]}')
+            if row == 1:
+                ax.set_xticklabels(algorithms)
+            else:
+                ax.set_xticklabels([])
+            if row == 0:
+                ax.set_title(f'{label_list[state_idx]}')
             if state_idx == 0:
-                ax.set_ylabel(row_title)
-            ax.grid(True, linestyle='--', alpha=0.7)
+                ax.set_ylabel(row_title, fontweight='bold')
 
-    # 添加自定义的图例
-    handles = [plt.Line2D([0], [0], color=colors[algo], lw=2) for algo in algorithms]
-    fig.legend(handles, algorithms, loc='upper left', bbox_to_anchor=(0.02, 0.98), ncol=len(algorithms), frameon=False)
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.88)
+    plt.subplots_adjust(wspace=0.5)
     plt.show()
     if save_fig:
         save_path = os.path.join(fig_dir, f"accuracy_comparison.{save_format}")
@@ -207,14 +243,14 @@ def plot_accuracy_comparison(title):
         print(f"Figure saved to {save_path}")
 
 def plot_trajectory_comparison(title, dataset_prefix):
-    fig, ax = plt.subplots(figsize=(10, 8))
-    fig.suptitle(title, fontsize=16)
-
+    utils.setup_matplotlib_style(single_column=True, figure_height=5)
+    fig, ax = plt.subplots()
+    
     # 绘制真实轨迹
     true_test_filepath = os.path.join(base_dir, f"{dataset_prefix}.csv")
     if os.path.exists(true_test_filepath):
         true_df = pd.read_csv(true_test_filepath)
-        ax.plot(true_df['state_0'], true_df['state_1'], 'k--', label='True Trajectory', linewidth=2)
+        ax.plot(true_df['state_0'], true_df['state_1'], 'k--', label='True Trajectory')
     else:
         print("True dataset file not found!")
 
@@ -224,7 +260,7 @@ def plot_trajectory_comparison(title, dataset_prefix):
         max_len = 0
 
         for run_id in range(max_run_id + 1):
-            test_filename = f"{algo}_RunID={run_id}_{dataset_prefix}_prediction.csv"
+            test_filename = f"KVLCC2_Algorithms_{algo}_RandomID={run_id}_{dataset_prefix}_prediction.csv"
             test_filepath = os.path.join(base_dir, test_filename)
 
             if os.path.exists(test_filepath):
@@ -257,7 +293,7 @@ def plot_trajectory_comparison(title, dataset_prefix):
         std_y = np.std(padded_y, axis=0)
 
         # 绘制平均预测轨迹
-        ax.plot(mean_x, mean_y, color=colors[algo], label=algo, linewidth=2)
+        ax.plot(mean_x, mean_y, color=colors[algo], label=algo)
         
         if 'true_df' in locals():
             true_x = true_df['state_0'].values
@@ -285,12 +321,11 @@ def plot_trajectory_comparison(title, dataset_prefix):
 
     # Re-plot true trajectory to ensure it is drawn on top of the shaded areas
     if os.path.exists(true_test_filepath):
-        ax.plot(true_df['state_0'], true_df['state_1'], 'k--', linewidth=2)
-
-    ax.set_xlabel('x (m)', fontsize=12)
-    ax.set_ylabel('y (m)', fontsize=12)
+        ax.plot(true_df['state_0'], true_df['state_1'], 'k--')
+    ax.set_title(title,fontweight='bold')
+    ax.set_xlabel('x (m)')
+    ax.set_ylabel('y (m)')
     ax.legend()
-    ax.grid(True, linestyle='--', alpha=0.7)
     
     plt.tight_layout()
     plt.subplots_adjust(top=0.92)
@@ -303,5 +338,5 @@ def plot_trajectory_comparison(title, dataset_prefix):
 if __name__ == "__main__":
     plot_lml_convergence("Log Marginal Likelihood (LML) Convergence Comparison")
     plot_accuracy_comparison("RMSE and MAE Comparison")
-    plot_trajectory_comparison("Trajectory (x, y) Comparison on Train Set", "TestSet")
-    plot_trajectory_comparison("Trajectory (x, y) Comparison on Train Set", "TrainingSet")
+    plot_trajectory_comparison("(a)", "TrainingSet")
+    plot_trajectory_comparison("(b)", "TestSet")

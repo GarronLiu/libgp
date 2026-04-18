@@ -95,130 +95,6 @@ int main(int argc, char const *argv[]) {
 
     NonlinearSystem system(basis, init_params, state_sym, control_sym);
 
-    // 5.1 Preprocessing of data before SGP regression：smooth state time
-    // series data with one-dimensional GP
-    // std::cout << "\n\033[34m========== State Smoothing via Sparse GP "
-    //              "==========\033[0m\n"
-    //           << std::endl;
-    // size_t state_dim_ = train_data.state[0].size();
-    // std::vector<Eigen::VectorXd> state_smoothed(train_data.state.size());
-    // std::vector<Eigen::VectorXd> gp_smoothed_derivatives(state_dim_);
-    // {
-    //   for (size_t j = 0; j < train_data.state.size(); ++j) {
-    //     state_smoothed[j] = train_data.state[j];
-    //   }
-    //   std::unique_ptr<libgp::SparseGaussianProcess> gp_smoother_;
-    //   for (size_t i = 3; i < state_dim_; ++i) {
-
-    //     if (i == 3) {
-    //       gp_smoother_.reset(new libgp::SparseGaussianProcess(
-    //           1, "CovSum(CovSEiso, CovNoise)"));
-    //     } else {
-    //       gp_smoother_.reset(new libgp::SparseGaussianProcess(
-    //           1, "CovSum(CovMatern5iso, CovNoise)"));
-    //     }
-    //     // 根据时间范围设置诱导点
-    //     double time_interval = 1.0;
-    //     double duration = train_data.time.back() - train_data.time.front();
-    //     size_t inducing_points_num =
-    //         static_cast<size_t>(ceil((duration) / time_interval));
-    //     std::vector<Eigen::VectorXd> t_inducing_points;
-    //     t_inducing_points.reserve(inducing_points_num);
-    //     for (size_t j = 0; j < inducing_points_num; ++j) {
-    //       double time_val = static_cast<double>(j) * time_interval + train_data.time.front();
-    //       Eigen::VectorXd pt(1);
-    //       pt << time_val;
-    //       t_inducing_points.push_back(pt);
-    //     }
-
-    //     gp_smoother_->specify_inducingSet(t_inducing_points);
-
-    //     // Initialize hyperparameters to zeros
-    //     Eigen::VectorXd params_gp(gp_smoother_->covf().get_param_dim());
-    //     params_gp.setZero();
-    //     gp_smoother_->covf().set_loghyper(params_gp);
-
-    //     for (size_t j = 0; j < train_data.state.size(); ++j) {
-    //       double state_val = train_data.state[j](i);
-    //       double time_val[] = {train_data.time[j]};
-    //       gp_smoother_->add_pattern(time_val, state_val);
-    //     }
-
-    //     // Optimize hyperparameters
-    //     libgp::LBFGS cg_optimizer;
-    //     cg_optimizer.set_tolerance(1e-3);
-    //     cg_optimizer.maximize(gp_smoother_.get(), 50, true);
-
-    //     Eigen::VectorXd state_smoothed_per_dim, state_variance;
-    //     state_smoothed_per_dim.resize(train_data.state.size());
-    //     state_variance.resize(train_data.state.size());
-    //     gp_smoother_->pred_diag(state_smoothed_per_dim, state_variance);
-    //     gp_smoother_->pred_diag_derivative(gp_smoothed_derivatives[i]);
-
-    //     // plot smoothed vs original
-    //     std::vector<double> t_vec(train_data.state.size()),
-    //         x_orig(train_data.state.size()), x_smooth(train_data.state.size());
-    //     for (size_t j = 0; j < train_data.state.size(); ++j) {
-    //       t_vec[j] = train_data.time[j];
-    //       x_orig[j] = train_data.state[j](i);
-    //       x_smooth[j] = state_smoothed_per_dim(j);
-    //       state_smoothed[j](i) =
-    //           x_smooth[j]; // update state data with smoothed value
-    //     }
-
-    //     //可视化平滑结果
-    //     if (CasadiUtils::verbose) {
-
-    //       CasadiUtils::plot_format_init(17.0, 12.0);
-    //       plt::named_plot("Original", t_vec, x_orig, "b.");
-    //       plt::named_plot("Smoothed", t_vec, x_smooth, "r-");
-    //       plt::title("State " + std::to_string(i) + " Smoothing via Sparse GP");
-    //       plt::xlabel("Time [s]");
-    //       plt::ylabel("State Value");
-    //       plt::legend();
-    //       plt::grid(true);
-    //       plt::show();
-
-    //       // Numerical derivative computation (centered difference)
-    //       Eigen::VectorXd derivatives;
-    //       derivatives.resize(train_data.state.size() - 2);
-    //       for (size_t j = 1; j < train_data.state.size() - 1; ++j) {
-    //         double dt_fwd = train_data.time[j + 1] - train_data.time[j];
-    //         double dt_bwd = train_data.time[j] - train_data.time[j - 1];
-    //         double dx_fwd = x_orig[j + 1] - x_orig[j];
-    //         double dx_bwd = x_orig[j] - x_orig[j - 1];
-    //         derivatives(j - 1) = (dx_fwd / dt_fwd + dx_bwd / dt_bwd) / 2.0;
-    //       }
-    //       // GP smoothed derivative prediction
-
-    //       // plot gp smoothed derivative vs numerical derivative
-    //       std::vector<double> deriv_orig(train_data.state.size() - 2),
-    //           deriv_smooth(train_data.state.size() - 2),
-    //           t_deriv_vec(train_data.state.size() - 2);
-    //       for (size_t j = 1; j < train_data.state.size() - 1; ++j) {
-    //         t_deriv_vec[j - 1] = train_data.time[j];
-    //         deriv_orig[j - 1] = derivatives(j - 1);
-    //         deriv_smooth[j - 1] = gp_smoothed_derivatives[i](j);
-    //       }
-    //       CasadiUtils::plot_format_init(17.0, 12.0);
-    //       plt::named_plot("Numerical Derivative", t_deriv_vec, deriv_orig,
-    //                       "b.");
-    //       plt::named_plot("GP Smoothed Derivative", t_deriv_vec, deriv_smooth,
-    //                       "r-");
-    //       plt::title("State " + std::to_string(i) + " Derivative Comparison");
-    //       plt::xlabel("Time [s]");
-    //       plt::ylabel("Derivative Value");
-    //       plt::legend();
-    //       plt::grid(true);
-    //       plt::show();
-    //     }
-    //   }
-    // }
-    // /// 保存平滑后的训练集
-    // CasadiUtils::save_to_csv(experiment_name + "_TrainingSet_Smoothed",
-    //                          state_smoothed, train_data.control,
-    //                          train_data.time);
-
     size_t state_dim_ = train_data.state[0].size();
     std::vector<Eigen::VectorXd> state_smoothed(train_data.state.size());
     std::vector<Eigen::VectorXd> gp_smoothed_derivatives(state_dim_);
@@ -243,11 +119,11 @@ int main(int argc, char const *argv[]) {
       gp_smoothed_derivatives[i](train_data.state.size() - 1) = gp_smoothed_derivatives[i](train_data.state.size() - 2);
     }
 
-    size_t max_runs = 1;
+    size_t max_runs = 10;
     size_t clusters = 50;
     size_t max_iters = 200;
     size_t downsample_rate = 1;
-    std::vector<std::string> algorithms = {"DE"};
+    std::vector<std::string> algorithms = {"CG"};
     // 6. Sparse GP Full Dynamics Estimation
     for (size_t run_id = 0; run_id < max_runs; run_id++) {
       for (size_t algorithm_id = 0; algorithm_id < algorithms.size();

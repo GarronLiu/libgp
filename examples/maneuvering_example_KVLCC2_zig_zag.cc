@@ -35,8 +35,6 @@ int main(int argc, char const *argv[]) {
         state_dot_func, dt, {25.0, 20.0, 15.0}, {25.0, 20.0, 15.0}, 2);
     CasadiUtils::DataSet sim_data_2 =
         run_sequential_zigzag_simulation(state_dot_func, dt, {25.0}, {15.0}, 2);
-    // CasadiUtils::DataSet sim_data_3 =
-    //     run_turning_circle_simulation(state_dot_func, dt, 15.0, true);
 
     //保存未加噪的训练集
     CasadiUtils::save_to_csv("TrainingSet_wo_noise", sim_data_1.state,
@@ -251,8 +249,8 @@ int main(int argc, char const *argv[]) {
     size_t max_runs = 10;
     size_t clusters = 50;
     size_t max_iters = 50;
-    size_t downsample_rate = 2;
-    std::vector<std::string> algorithms = {"DE"};
+    size_t downsample_rate = 5;
+    std::vector<std::string> algorithms = {"CG"};
     for (size_t run_id = 0; run_id < max_runs; run_id++) {
       for (size_t algorithm_id = 0; algorithm_id < algorithms.size();
            algorithm_id++) {

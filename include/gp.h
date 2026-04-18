@@ -121,6 +121,8 @@ public:
 
   virtual Eigen::VectorXd getFlatAlpha();
 
+  virtual void check_gradient();
+
   SampleSet *sampleset;
 
 protected:

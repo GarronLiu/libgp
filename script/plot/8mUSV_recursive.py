@@ -4,7 +4,9 @@ import pandas as pd
 
 import matplotlib.pyplot as plt
 
-base_dir = "result/8mUSV_Recursive/ZigZag10deg"
+import utils
+
+base_dir = "result/8mUSV_Recursive/ZigZag20deg"
 conditions = ["wo_rec", 
               "rec", 
               "rec_wo_hyperUpdate", 
@@ -26,26 +28,37 @@ ground_truth_file = os.path.join(base_dir, "TrainSet.csv")
 gt_data = pd.read_csv(ground_truth_file)
 
 # Create figure with 6 subplots
-fig, axes = plt.subplots(6, 2, figsize=(12, 10))
+utils.setup_matplotlib_style(single_column=False, figure_height=18)
+fig, axes = plt.subplots(6, 2)
+df_state_names = ['x', 'y', 'psi', 'u', 'v', 'r']
 state_names = ['x', 'y', 'psi', 'u', 'v', 'r']
-
-
+label_list = ["x(m)", "y(m)", "$\\psi$(rad)", "u(m/s)", "v(m/s)", "r(deg/s)"]
 # Plot each state
 for state_idx in range(6):
     ax = axes[state_idx, 0]
     
     # Plot ground truth
-    ax.plot(gt_data['time'], gt_data[f'{state_names[state_idx]}'], 'k-', linewidth=2, label='GT')
+    ax.plot(gt_data['time'], gt_data[f'{df_state_names[state_idx]}'], 'k-', label='GT')
     
     # Plot predictions for first 3 conditions
     for line, condition, pred_file in zip(lines[:3], conditions[:3], prediction_files[:3]):
         pred_data = pd.read_csv(pred_file)
         ax.plot(pred_data['time'], pred_data[f'state_{state_idx}'], 
                 color=colors[condition], label=labels[conditions.index(condition)], linestyle=line)
-    
-    ax.set_xlabel('Time (s)')
-    ax.set_ylabel(state_names[state_idx])
-    ax.grid(True, alpha=0.3)
+        #统计RMSE
+        gt_interp = np.interp(pred_data['time'], gt_data['time'], gt_data[state_names[state_idx]])
+        rmse = np.sqrt(np.mean((pred_data[f'state_{state_idx}'] - gt_interp)**2))
+        print(f"[{condition}] state {state_names[state_idx]} RMSE: {rmse:.4f}")
+        
+        if state_idx == 1:
+            gt_x_interp = np.interp(pred_data['time'], gt_data['time'], gt_data['x'])
+            gt_y_interp = np.interp(pred_data['time'], gt_data['time'], gt_data['y'])
+            rmse_pos = np.sqrt(np.mean((pred_data['state_0'] - gt_x_interp)**2 + (pred_data['state_1'] - gt_y_interp)**2))
+            print(f"[{condition}] XY Position RMSE: {rmse_pos:.4f}")
+
+    if(state_idx == 5):
+        ax.set_xlabel('Time (s)')
+    ax.set_ylabel(label_list[state_idx])
     if state_idx == 0:
         ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.35), ncol=4, frameon=True)
 
@@ -54,17 +67,27 @@ for state_idx in range(6):
     ax = axes[state_idx, 1]
     
     # Plot ground truth
-    ax.plot(gt_data['time'], gt_data[f'{state_names[state_idx]}'], 'k-', linewidth=2, label='GT')
+    ax.plot(gt_data['time'], gt_data[f'{state_names[state_idx]}'], 'k-', label='GT')
     
     # Plot predictions for last 2 conditions
     for line, condition, pred_file in zip(lines[3:], conditions[3:], prediction_files[3:]):
         pred_data = pd.read_csv(pred_file)
         ax.plot(pred_data['time'], pred_data[f'state_{state_idx}'], 
                 color=colors[condition], label=labels[conditions.index(condition)], linestyle=line)
-    
-    ax.set_xlabel('Time (s)')
-    ax.set_ylabel(state_names[state_idx])
-    ax.grid(True, alpha=0.3)
+        #统计RMSE
+        gt_interp = np.interp(pred_data['time'], gt_data['time'], gt_data[state_names[state_idx]])
+        rmse = np.sqrt(np.mean((pred_data[f'state_{state_idx}'] - gt_interp)**2))
+        print(f"[{condition}] state {state_names[state_idx]} RMSE: {rmse:.4f}")
+        
+        if state_idx == 1:
+            gt_x_interp = np.interp(pred_data['time'], gt_data['time'], gt_data['x'])
+            gt_y_interp = np.interp(pred_data['time'], gt_data['time'], gt_data['y'])
+            rmse_pos = np.sqrt(np.mean((pred_data['state_0'] - gt_x_interp)**2 + (pred_data['state_1'] - gt_y_interp)**2))
+            print(f"[{condition}] XY Position RMSE: {rmse_pos:.4f}")
+
+    if(state_idx == 5):
+        ax.set_xlabel('Time (s)')
+    ax.set_ylabel(label_list[state_idx])
     if state_idx == 0:
         ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.35), ncol=3, frameon=True)
 
@@ -78,15 +101,16 @@ target_label = "REC REPROP"
 pred_path = os.path.join(base_dir, f"8mUSV_prediction_{target_condition}.csv")
 pred_data = pd.read_csv(pred_path)
 
-fig, axes = plt.subplots(3, 2, figsize=(12, 8))
-axes = axes.flatten()
+utils.setup_matplotlib_style(single_column=False, figure_height=9)  # figure_height=3对于3行2列过于扁平，先改为12等比例
+fig, axes = plt.subplots(3, 2)
+axes = axes.flatten(order='F')
 
 for i, ax in enumerate(axes):
     t = pred_data["time"].to_numpy()
     y_pred = pred_data[f"state_{i}"].to_numpy()
 
-    ax.plot(gt_data["time"], gt_data[state_names[i]], "k-", lw=1.8, label="GT")
-    ax.plot(t, y_pred, color=colors[target_condition], lw=1.6, label=target_label, linestyle="--")
+    ax.plot(gt_data["time"], gt_data[state_names[i]], "k-", label="GT")
+    ax.plot(t, y_pred, color=colors[target_condition], label=target_label, linestyle="--")
 
     # 优先读取上下界；若无则尝试 std/var
     cov_col_names= [f"cov_{i}" for i in range(36)]
@@ -100,14 +124,15 @@ for i, ax in enumerate(axes):
     sigma = cov_sigma[:, i]
     ax.fill_between(t, y_pred - sigma, y_pred + sigma, color=colors[target_condition], alpha=0.2, linewidth=0, label="±1σ")
 
-    ax.set_title(state_names[i])
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel(state_names[i])
-    ax.grid(alpha=0.3)
+    if(i == 2 or i == 5):
+        ax.set_xlabel('Time (s)')
+    ax.set_ylabel(label_list[i])
 
 handles, legend_labels = axes[0].get_legend_handles_labels()
-fig.legend(handles, legend_labels, loc="upper center", ncol=3, frameon=True)
-plt.tight_layout(rect=[0, 0, 1, 0.95])
-plt.savefig(os.path.join(base_dir, "rec_reprop_state_uncertainty.svg"), dpi=150)
+fig.legend(handles, legend_labels, loc="upper left", bbox_to_anchor=(0.1, 0.95), ncol=3, frameon=True)
+plt.tight_layout()
+plt.savefig(os.path.join(base_dir, "rec_reprop_state_uncertainty.svg"))
 plt.show()
+
+
 

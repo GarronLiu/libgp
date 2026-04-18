@@ -4,18 +4,21 @@ import pandas as pd
 
 import matplotlib.pyplot as plt
 
+import utils
+
 # 配置参数
 base_dir = "result/8mUSV/"
-benchmarks = ["Koopman", "nuSVR($\\nu=0.2$)", "nuSVR($\\nu=0.03$)", "SGP-DE(ind_num=50)"]
+benchmarks = ["Koopman", "nuSVR($\\nu=0.05$)", "SGP-DE(ind_num=50)", "SGP-CG(ind_num=50)"]
 prediction_files = [
-    "8mUSV_None_KPM_TrainingSet_prediction.csv",
-    "8mUSV_None_nuSVR_nu=2e-1_TrainingSet_prediction.csv",
-    "8mUSV_None_nuSVR_nu=3e-2_TrainingSet_prediction.csv",
-    "8mUSV_DE_RandomID=8_TrainingSet_prediction.csv"
+    "8mUSV_Lemniscate_KPM_TrainingSet_prediction.csv",
+    "8mUSV_Lemniscate_nuSVR_TrainingSet_prediction.csv",
+    "8mUSV_DE_RandomID=8_TrainingSet_prediction.csv",
+    "8mUSV_CG_RandomID=7_TrainingSet_prediction.csv"
 ]
 states = [3, 4, 5]
 cmap = plt.get_cmap('tab10')
 colors = {benchmark: cmap(i % 10) for i, benchmark in enumerate(benchmarks)}
+lines = [':', ':', '--', '--']
 
 # 配置图保存参数
 save_fig = True
@@ -51,8 +54,8 @@ def plot_accuracy_comparison(title):
     rad_to_deg = 180.0 / np.pi
     
     # 绘制六个状态的时历曲线
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
-    fig.suptitle(title, fontsize=16)
+    utils.setup_matplotlib_style(single_column=False, figure_height=6)
+    fig, axes = plt.subplots(2, 3)
     
     label_list = ["x(m)", "y(m)", "$\\psi$(deg)", "u(m/s)", "v(m/s)", "r(deg/s)"]
     
@@ -63,7 +66,7 @@ def plot_accuracy_comparison(title):
         true_data = true_train_df[f'state_{state_idx}'].values
         if state_idx in [2, 5]:  # 角度和角速度转换为度
             true_data = true_data * rad_to_deg
-        ax.plot(true_data, 'k-', label='Ground Truth', linewidth=2)
+        ax.plot(true_data, 'k--', label='Ground Truth')
         
         # 绘制每个benchmark的预测数据
         for benchmark in benchmarks:
@@ -76,16 +79,15 @@ def plot_accuracy_comparison(title):
                 min_len = min(len(pred_data), len(true_data))
                 rmse = np.sqrt(np.mean((pred_data[:min_len] - true_data[:min_len])**2))
                 
-                ax.plot(pred_data, color=colors[benchmark], label=f'{benchmark} (RMSE: {rmse:.4f})', linewidth=2)
-        
-        ax.set_xlabel('Time Step')
-        ax.set_ylabel(label)
-        ax.grid(True, linestyle='--', alpha=0.7)
-        if state_idx == 0:
-            ax.legend(loc='best', fontsize=9)
+                ax.plot(pred_data, color=colors[benchmark], label=f'{benchmark} (RMSE: {rmse:.4f})', linestyle=lines[benchmarks.index(benchmark)])
+        if state_idx // 3 == 1:
+            ax.set_xlabel('time(s)')
+        ax.set_title(label)
+        if state_idx == 2:
+            ax.legend()
     
     plt.tight_layout()
-    plt.subplots_adjust(top=0.93)
+    # plt.subplots_adjust(top=0.93)
     plt.show()
     if save_fig:
         save_path = os.path.join(fig_dir, f"accuracy_comparison_timeseries.{save_format}")
@@ -93,8 +95,8 @@ def plot_accuracy_comparison(title):
         print(f"Figure saved to {save_path}")
     
     # 绘制xy平面轨迹 - 分开四个子图
-    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
-    fig.suptitle(f"{title} - XY Trajectory Comparison", fontsize=16)
+    utils.setup_matplotlib_style(single_column=True, figure_height=4.5)
+    fig, axes = plt.subplots(1, 4)
     
     true_x = true_train_df['state_0'].values
     true_y = true_train_df['state_1'].values
@@ -103,7 +105,7 @@ def plot_accuracy_comparison(title):
     for idx, benchmark in enumerate(benchmarks):
         ax = axes[idx]
         # 绘制Ground Truth作为参考
-        ax.plot(true_x, true_y, 'k--', label='Ground Truth', linewidth=2, alpha=0.5)
+        ax.plot(true_x, true_y, 'k--', label='Ground Truth', alpha=0.5)
         
         if predictions[benchmark] is not None:
             pred_x = predictions[benchmark]['state_0'].values
@@ -113,21 +115,17 @@ def plot_accuracy_comparison(title):
             min_len = min(len(pred_x), len(true_x))
             rmse_xy = np.sqrt(np.mean((pred_x[:min_len] - true_x[:min_len])**2 + (pred_y[:min_len] - true_y[:min_len])**2))
             
-            ax.plot(pred_x, pred_y, color=colors[benchmark], label=f'{benchmark}\n(RMSE: {rmse_xy:.4f})', linewidth=2)
+            ax.plot(pred_x, pred_y, color=colors[benchmark], label=f'{benchmark}\n(RMSE: {rmse_xy:.4f})')
         
-        ax.set_title(benchmark, fontsize=12)
-        ax.set_xlabel('x (m)', fontsize=12)
-        ax.set_ylabel('y (m)', fontsize=12)
-        ax.legend(loc='best', fontsize=9)
-        ax.grid(True, linestyle='--', alpha=0.7)
-    
-    ax.set_xlabel('x (m)', fontsize=12)
-    ax.set_ylabel('y (m)', fontsize=12)
-    ax.legend(loc='best')
-    ax.grid(True, linestyle='--', alpha=0.7)
+        ax.set_xlabel('x (m)')
+        if idx == 0:
+            ax.set_ylabel('y (m)')
+        if idx != 0:
+            ax.set_yticklabels([])
+        ax.set_title(benchmark, fontsize=4)
     
     plt.tight_layout()
-    plt.subplots_adjust(top=0.92)
+    # plt.subplots_adjust(top=0.92)
     plt.show()
     if save_fig:
         save_path = os.path.join(fig_dir, f"accuracy_comparison_trajectory.{save_format}")

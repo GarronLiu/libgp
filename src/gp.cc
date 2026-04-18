@@ -406,6 +406,58 @@ Eigen::VectorXd GaussianProcess::log_likelihood_gradient() {
   return grad;
 }
 
+
+void GaussianProcess::check_gradient() {
+  Eigen::VectorXd analytic_grad = log_likelihood_gradient(); // 您的解析梯度
+
+  double epsilon = 1e-5; // 小扰动
+  // 对每个参数进行数值梯度计算
+  Eigen::VectorXd params = get_hyperparameters();
+  Eigen::VectorXd numeric_grad(params.size());
+
+  for (int i = 0; i < params.size(); ++i) {
+    double original = params(i);
+
+    // 前向扰动
+    params(i) = original + epsilon;
+    update_hyperparameters(params);
+    double f_plus = log_likelihood(); // 需要实现
+
+    // 后向扰动
+    params(i) = original - epsilon;
+    update_hyperparameters(params);
+    double f_minus = log_likelihood();
+
+    // 中心差分
+    numeric_grad(i) = (f_plus - f_minus) / (2 * epsilon);
+
+    // 恢复参数
+    params(i) = original;
+  }
+
+  update_hyperparameters(params); // 恢复原始参数
+
+  // 比较解析梯度和数值梯度
+  double rel_error = (analytic_grad - numeric_grad).norm() /
+                     (analytic_grad.norm() + numeric_grad.norm() + 1e-8);
+
+  std::cout << "相对误差: " << rel_error << std::endl;
+  if (rel_error > 1e-4) {
+    std::cout << "梯度可能存在错误！" << std::endl;
+  }
+
+  // 逐项显示误差
+  std::cout << "参数\t解析梯度\t数值梯度\t绝对误差\t相对误差" << std::endl;
+  for (int i = 0; i < params.size(); ++i) {
+    double abs_err = std::abs(analytic_grad(i) - numeric_grad(i));
+    double rel_err = abs_err / (std::abs(analytic_grad(i)) +
+                                std::abs(numeric_grad(i)) + 1e-12);
+    std::cout << i << "\t" << analytic_grad(i) << "\t" << numeric_grad(i)
+              << "\t" << abs_err << "\t" << rel_err << std::endl;
+  }
+}
+
+
 void GaussianProcess::update_hyperparameters(const Eigen::VectorXd &params) {
   cf->set_loghyper(params);
 }

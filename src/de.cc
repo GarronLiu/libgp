@@ -24,7 +24,7 @@ static std::mt19937 rng(rd());
 DE::DE() : lml_(0), duration_(0), 
            population_size_(50),    // DE 通常不需要像 GA 那么大的种群
            crossover_rate_(0.9),    // CR 通常较大
-           differential_weight_(0.5) // F 通常在 [0.5, 1.0] 之间
+           differential_weight_(0.7) // F 通常在 [0.5, 1.0] 之间
 {
 }
 
@@ -41,12 +41,10 @@ void DE::maximize(GaussianProcess* gp, size_t max_generations, bool verbose)
     lml_history_.reserve(max_generations);
     time_cost_history_.clear();
     time_cost_history_.reserve(max_generations);
-    std::cout << "Starting DE optimization for " << max_generations << " generations..." << std::endl;
     Eigen::VectorXd initial_params = gp->get_hyperparameters();
     // 获取超参的上下界
     Eigen::VectorXd lb = gp->get_hyperparameter_lower_bound();
     Eigen::VectorXd ub = gp->get_hyperparameter_upper_bound();
-    std::cout << "Initial Hyperparameters: " << initial_params.transpose() << std::endl;
     
     int param_dim = initial_params.size();
 

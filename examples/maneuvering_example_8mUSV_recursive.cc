@@ -3,7 +3,8 @@ using namespace CasadiUtils;
 
 MX state_sym;
 MX control_sym;
-std::vector<std::unique_ptr<RecursiveGaussianProcess>> rgp_vec;
+// std::vector<std::unique_ptr<RecursiveGaussianProcess>> rgp_vec;
+std::vector<std::unique_ptr<SparseGaussianProcess>> rgp_vec;
 RK4Simulator rk4_simulator_;
 auto active_state_mask = {false, false, false, true, true, true};
 
@@ -80,7 +81,7 @@ void visualize_full_state_with_cov(
   }
   auto state_dim = state_vec[0].size();
   // Visualize state trajectory with uncertainty On Training Data
-  CasadiUtils::plot_format_init(17.0, 12.0);
+  CasadiUtils::plot_format_init(34.0, 24.0);
   for (size_t d = 0; d < state_dim; ++d) {
 
     std::vector<double> t_vec(time_vec.begin(), time_vec.end());
@@ -135,6 +136,58 @@ void visualize_full_state_with_cov(
   return;
 }
 
+void save_to_csv(const std::string &filename_prefix,
+                 const std::string &experiment_name,
+                 const std::vector<Eigen::VectorXd> &state_vec,
+                 const std::vector<Eigen::MatrixXd> &cov_vec,
+                 const std::vector<double> &time_vec) {
+  std::string filename =
+      filename_prefix + "/8mUSV_prediction_" + experiment_name + ".csv";
+  std::ofstream csv_file(filename);
+  if (csv_file.is_open()) {
+    // 自动生成表头
+    csv_file << "time";
+    if (!state_vec.empty()) {
+      for (int j = 0; j < state_vec[0].size(); ++j) {
+        csv_file << ",state_" << j;
+      }
+    }
+
+    if (!cov_vec.empty()) {
+      for (int j = 0; j < cov_vec[0].size(); ++j) {
+        csv_file << ",cov_" << j;
+      }
+    }
+    csv_file << "\n";
+
+    // 写入数据
+    for (size_t i = 0; i < time_vec.size(); ++i) {
+      // time
+      csv_file << time_vec[i];
+
+      // state (x, y, psi, u, v, r)
+      if (i < state_vec.size()) {
+        for (int j = 0; j < state_vec[i].size(); ++j) {
+          csv_file << "," << state_vec[i](j);
+        }
+      }
+
+      // covariance
+      if (i < cov_vec.size()) {
+        for (int j = 0; j < cov_vec[i].size(); ++j) {
+          csv_file << "," << cov_vec[i](j);
+        }
+      } else {
+        csv_file << ",0,0,0,0,0,0"; // 防止越界
+      }
+      csv_file << "\n";
+    }
+    csv_file.close();
+    std::cout << "Data saved to " << filename << std::endl;
+  } else {
+    std::cerr << "Unable to open file: " << filename << std::endl;
+  }
+}
 // ==========================================
 // Main Function
 // ==========================================
@@ -148,10 +201,9 @@ int main(int argc, char const *argv[]) {
   CasadiUtils::verbose = std::stod(argv[1]);
 
   std::string experiment_name = "8mUSV_recursive";
-  std::string dataset_path_1 =
+  std::string ws_path =
       (argc > 2) ? argv[2]
-                 : "/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/"
-                   "dataset/rosbag/csv/zig_zag_20_20.csv";
+                 : "/home/garronliu/2_Tracking_control/GP-MPC/libgp-master/result/8mUSV_Recursive/ZigZag10deg";
   std::string model_path = (argc > 3)
                                ? argv[3]
                                : "/home/garronliu/2_Tracking_control/"
@@ -166,7 +218,8 @@ int main(int argc, char const *argv[]) {
               << std::endl;
 
     // 1. 从文件中读取数据集
-    auto train_data = prepareDataSet(dataset_path_1.c_str(), 5);
+    std::string train_set_path = ws_path + "/TrainSet.csv";
+    auto train_data = prepareDataSet(train_set_path.c_str(), 1);
     double dt = train_data.time[1] - train_data.time[0];
     dt = std::max(1e-4, dt);
     if (CasadiUtils::verbose) {
@@ -217,10 +270,12 @@ int main(int argc, char const *argv[]) {
         model_path + "/8mUSV_GA_RandomID=0_sparse_gp_model_state_4.yaml",
         model_path + "/8mUSV_GA_RandomID=0_sparse_gp_model_state_5.yaml"};
     for (size_t i = 0; i < model_files.size(); ++i) {
+      // rgp_vec[i] =
+      //     std::make_unique<RecursiveGaussianProcess>(model_files[i].c_str());
+      // rgp_vec[i]->sampleset->clear(); // Clear the sample set to prepare for
+      //                                 // online updates
       rgp_vec[i] =
-          std::make_unique<RecursiveGaussianProcess>(model_files[i].c_str());
-      rgp_vec[i]->sampleset->clear(); // Clear the sample set to prepare for
-                                      // online updates
+          std::make_unique<SparseGaussianProcess>(model_files[i].c_str());
     }
 
     // 4. 构建RK4模型进行预测
@@ -240,7 +295,7 @@ int main(int argc, char const *argv[]) {
     // 4.1 记录多批次数据预测结果和误差
     std::vector<double> time_vec;
     std::vector<Eigen::VectorXd> state_true_vec;
-    size_t epoch_size = 100; // 每批次包含100个时间步
+    size_t epoch_size = 500; // 每批次包含100个时间步
 
     // 4.1.1 无递归更新
     std::vector<Eigen::VectorXd> state_pred_vec_wo_recursive;
@@ -271,114 +326,234 @@ int main(int argc, char const *argv[]) {
     visualize_full_state_with_cov(state_pred_vec_wo_recursive,
                                   state_cov_vec_wo_recursive, train_data.state,
                                   train_data.time);
+    save_to_csv(ws_path, "wo_rec", state_pred_vec_wo_recursive,
+                state_cov_vec_wo_recursive, train_data.time);
 
     // 4.1.2 有递归更新
     // 4.1.2.1 有超参更新
-    std::vector<Eigen::VectorXd> state_pred_vec_recursive_hyperUpdate;
-    std::vector<Eigen::MatrixXd> state_cov_vec_recursive_hyperUpdate;
-    state_curr = train_data.state[0];
-    cov_curr = state_meas_cov;
-    state_pred_vec_recursive_hyperUpdate.push_back(state_curr);
-    state_cov_vec_recursive_hyperUpdate.push_back(cov_curr);
-    for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
-      if (k % epoch_size == 0 && k > 0) {
-        // reset to true state at the beginning of each batch
-        state_curr = train_data.state[k + 1];
-        cov_curr = state_meas_cov;
-        for (size_t dim = 0; dim < 3; ++dim) {
-          rgp_vec[dim]->epochUpdate();
-        }
-        rk4_update();
-      } else {
-        // propagate with RK4 Simulator
-        double dt = train_data.time[k + 1] - train_data.time[k];
-        if (dt <= 0)
-          dt = 1e-4;
-        Eigen::VectorXd u = train_data.control.empty() ? Eigen::VectorXd()
-                                                       : train_data.control[k];
-        std::tie(state_curr, cov_curr) =
-            rk4_simulator_.step_with_uncertainty(state_curr, u, dt, cov_curr);
-      }
+    {
+      std::vector<Eigen::VectorXd> state_pred_vec_recursive_hyperUpdate;
+      std::vector<Eigen::MatrixXd> state_cov_vec_recursive_hyperUpdate;
+      state_curr = train_data.state[0];
+      cov_curr = state_meas_cov;
       state_pred_vec_recursive_hyperUpdate.push_back(state_curr);
       state_cov_vec_recursive_hyperUpdate.push_back(cov_curr);
+      bool pretrained_need_store =
+          true; // 只在第一次进入循环时存储预训练模型的后验分布
+      for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
+        if (k % epoch_size == 0 && k > 0) {
+          // reset to true state at the beginning of each batch
+          state_curr = train_data.state[k + 1];
+          cov_curr = state_meas_cov;
 
-      // 计算uvr的中心微分
-      if (k > 0 && k < train_data.state.size() - 2) {
-        double dt_fwd = train_data.time[k + 1] - train_data.time[k];
-        double dt_bwd = train_data.time[k] - train_data.time[k - 1];
-        auto dx_fwd = train_data.state[k + 1].segment(3, 3) -
-                      train_data.state[k].segment(3, 3);
-        auto dx_bwd = train_data.state[k].segment(3, 3) -
-                      train_data.state[k - 1].segment(3, 3);
-        auto uvr_derivatives = (dx_fwd / dt_fwd + dx_bwd / dt_bwd) / 2.0;
-        Eigen::VectorXd gp_input(5);
-        gp_input << train_data.state[k](3), train_data.state[k](4),
-            train_data.state[k](5), train_data.control[k](0),
-            train_data.control[k](1);
+          libgp::CG optimizer;
+          optimizer.maximize(rgp_vec[0].get(), 15, 0);
+          optimizer.maximize(rgp_vec[1].get(), 5, 0);
+          optimizer.maximize(rgp_vec[2].get(), 10, 0);
 
-        for (int dim = 0; dim < 3; ++dim) {
-          rgp_vec[dim]->add_pattern(gp_input.data(), uvr_derivatives(dim));
+          pretrained_need_store = true;
+          rk4_update();
+        } else {
+          // propagate with RK4 Simulator
+          double dt = train_data.time[k + 1] - train_data.time[k];
+          if (dt <= 0)
+            dt = 1e-4;
+          Eigen::VectorXd u = train_data.control.empty()
+                                  ? Eigen::VectorXd()
+                                  : train_data.control[k];
+          std::tie(state_curr, cov_curr) =
+              rk4_simulator_.step_with_uncertainty(state_curr, u, dt, cov_curr);
+        }
+        state_pred_vec_recursive_hyperUpdate.push_back(state_curr);
+        state_cov_vec_recursive_hyperUpdate.push_back(cov_curr);
+
+        // 计算uvr的中心微分
+        if (k > 0 && k < train_data.state.size() - 2) {
+          double dt_fwd = train_data.time[k + 1] - train_data.time[k];
+          double dt_bwd = train_data.time[k] - train_data.time[k - 1];
+          auto dx_fwd = train_data.state[k + 1].segment(3, 3) -
+                        train_data.state[k].segment(3, 3);
+          auto dx_bwd = train_data.state[k].segment(3, 3) -
+                        train_data.state[k - 1].segment(3, 3);
+          auto uvr_derivatives = (dx_fwd / dt_fwd + dx_bwd / dt_bwd) / 2.0;
+          Eigen::VectorXd gp_input(5);
+          gp_input << train_data.state[k](3), train_data.state[k](4),
+              train_data.state[k](5), train_data.control[k](0),
+              train_data.control[k](1);
+
+          if (pretrained_need_store) {
+            for (int dim = 0; dim < 3; ++dim) {
+              rgp_vec[dim]->storePosteriorPretrained();
+            }
+            pretrained_need_store = false;
+          }
+          for (int dim = 0; dim < 3; ++dim) {
+            rgp_vec[dim]->add_pattern_batch(gp_input, uvr_derivatives(dim));
+            // rgp_vec[dim]->add_pattern(gp_input.data(), uvr_derivatives(dim));
+          }
         }
       }
-    }
-    std::cout << "Completed prediction with recursive update." << std::endl;
-    visualize_full_state_with_cov(state_pred_vec_recursive_hyperUpdate,
-                                  state_cov_vec_recursive_hyperUpdate,
-                                  train_data.state, train_data.time);
-    // 4.1.2.2 无超参更新
-    std::vector<Eigen::VectorXd> state_pred_vec_recursive_wo_hyperUpdate;
-    std::vector<Eigen::MatrixXd> state_cov_vec_recursive_wo_hyperUpdate;
-    state_curr = train_data.state[0];
-    cov_curr = state_meas_cov;
-    state_pred_vec_recursive_wo_hyperUpdate.push_back(state_curr);
-    state_cov_vec_recursive_wo_hyperUpdate.push_back(cov_curr);
+      std::cout << "Completed prediction with recursive update(hyperparameter "
+                   "update)."
+                << std::endl;
+      visualize_full_state_with_cov(state_pred_vec_recursive_hyperUpdate,
+                                    state_cov_vec_recursive_hyperUpdate,
+                                    train_data.state, train_data.time);
+      save_to_csv(ws_path, "rec", state_pred_vec_recursive_hyperUpdate,
+                  state_cov_vec_recursive_hyperUpdate, train_data.time);
 
-    for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
-      if (k % epoch_size == 0 && k > 0) {
-        // reset to true state at the beginning of each batch
-        state_curr = train_data.state[k + 1];
-        cov_curr = state_meas_cov;
-        // for (size_t dim = 0; dim < 3; ++dim) {
-        //   rgp_vec[dim]->epochUpdate();
-        // }
-        // rk4_update();
-      } else {
-        // propagate with RK4 Simulator
-        double dt = train_data.time[k + 1] - train_data.time[k];
-        if (dt <= 0)
-          dt = 1e-4;
-        Eigen::VectorXd u = train_data.control.empty() ? Eigen::VectorXd()
-                                                       : train_data.control[k];
-        std::tie(state_curr, cov_curr) =
-            rk4_simulator_.step_with_uncertainty(state_curr, u, dt, cov_curr);
+      // 重新传播一次，看是否能对整段轨迹进行更好的拟合
+      std::vector<Eigen::VectorXd> state_pred_vec_recursive_hyperUpdate_reprop;
+      std::vector<Eigen::MatrixXd> state_cov_vec_recursive_hyperUpdate_reprop;
+      state_curr = train_data.state[0];
+      cov_curr = state_meas_cov;
+      state_pred_vec_recursive_hyperUpdate_reprop.push_back(state_curr);
+      state_cov_vec_recursive_hyperUpdate_reprop.push_back(cov_curr);
+
+      for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
+        if (k % epoch_size == 0 && k > 0) {
+          // reset to true state at the beginning of each batch
+          state_curr = train_data.state[k + 1];
+          cov_curr = state_meas_cov;
+        } else {
+          // propagate with RK4 Simulator
+          double dt = train_data.time[k + 1] - train_data.time[k];
+          if (dt <= 0)
+            dt = 1e-4;
+          Eigen::VectorXd u = train_data.control.empty()
+                                  ? Eigen::VectorXd()
+                                  : train_data.control[k];
+          std::tie(state_curr, cov_curr) =
+              rk4_simulator_.step_with_uncertainty(state_curr, u, dt, cov_curr);
+        }
+        state_pred_vec_recursive_hyperUpdate_reprop.push_back(state_curr);
+        state_cov_vec_recursive_hyperUpdate_reprop.push_back(cov_curr);
       }
+      std::cout << "Repropagate prediction after hyperparameter update."
+                << std::endl;
+      visualize_full_state_with_cov(state_pred_vec_recursive_hyperUpdate_reprop,
+                                    state_cov_vec_recursive_hyperUpdate_reprop,
+                                    train_data.state, train_data.time);
+      save_to_csv(ws_path, "rec_reprop",
+                  state_pred_vec_recursive_hyperUpdate_reprop,
+                  state_cov_vec_recursive_hyperUpdate_reprop, train_data.time);
+    }
+
+    // 4.1.2.2 无超参更新
+    {
+      //重新加载预训练模型，确保在无超参更新的情况下进行预测
+      rgp_vec.clear();
+      rgp_vec.resize(3);
+      for (size_t i = 0; i < model_files.size(); ++i) {
+        rgp_vec[i] =
+            std::make_unique<SparseGaussianProcess>(model_files[i].c_str());
+      }
+      rk4_update();
+
+      std::vector<Eigen::VectorXd> state_pred_vec_recursive_wo_hyperUpdate;
+      std::vector<Eigen::MatrixXd> state_cov_vec_recursive_wo_hyperUpdate;
+      state_curr = train_data.state[0];
+      cov_curr = state_meas_cov;
       state_pred_vec_recursive_wo_hyperUpdate.push_back(state_curr);
       state_cov_vec_recursive_wo_hyperUpdate.push_back(cov_curr);
+      bool pretrained_need_store = true;
+      for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
+        if (k % epoch_size == 0 && k > 0) {
+          // reset to true state at the beginning of each batch
+          state_curr = train_data.state[k + 1];
+          cov_curr = state_meas_cov;
 
-      // // 计算uvr的中心微分
-      // if (k > 0 && k < train_data.state.size() - 2) {
-      //   double dt_fwd = train_data.time[k + 1] - train_data.time[k];
-      //   double dt_bwd = train_data.time[k] - train_data.time[k - 1];
-      //   auto dx_fwd = train_data.state[k + 1].segment(3, 3) -
-      //                 train_data.state[k].segment(3, 3);
-      //   auto dx_bwd = train_data.state[k].segment(3, 3) -
-      //                 train_data.state[k - 1].segment(3, 3);
-      //   auto uvr_derivatives = (dx_fwd / dt_fwd + dx_bwd / dt_bwd) / 2.0;
-      //   Eigen::VectorXd gp_input(5);
-      //   gp_input << train_data.state[k](3), train_data.state[k](4),
-      //       train_data.state[k](5), train_data.control[k](0),
-      //       train_data.control[k](1);
+          pretrained_need_store = true;
+          rk4_update();
 
-      //   for (int dim = 0; dim < 3; ++dim) {
-      //     rgp_vec[dim]->add_pattern(gp_input.data(), uvr_derivatives(dim));
-      //   }
-      // }
+        } else {
+          // propagate with RK4 Simulator
+          double dt = train_data.time[k + 1] - train_data.time[k];
+          if (dt <= 0)
+            dt = 1e-4;
+          Eigen::VectorXd u = train_data.control.empty()
+                                  ? Eigen::VectorXd()
+                                  : train_data.control[k];
+          std::tie(state_curr, cov_curr) =
+              rk4_simulator_.step_with_uncertainty(state_curr, u, dt, cov_curr);
+        }
+        state_pred_vec_recursive_wo_hyperUpdate.push_back(state_curr);
+        state_cov_vec_recursive_wo_hyperUpdate.push_back(cov_curr);
+
+        // 计算uvr的中心微分
+        if (k > 0 && k < train_data.state.size() - 2) {
+          double dt_fwd = train_data.time[k + 1] - train_data.time[k];
+          double dt_bwd = train_data.time[k] - train_data.time[k - 1];
+          auto dx_fwd = train_data.state[k + 1].segment(3, 3) -
+                        train_data.state[k].segment(3, 3);
+          auto dx_bwd = train_data.state[k].segment(3, 3) -
+                        train_data.state[k - 1].segment(3, 3);
+          auto uvr_derivatives = (dx_fwd / dt_fwd + dx_bwd / dt_bwd) / 2.0;
+          Eigen::VectorXd gp_input(5);
+          gp_input << train_data.state[k](3), train_data.state[k](4),
+              train_data.state[k](5), train_data.control[k](0),
+              train_data.control[k](1);
+
+          if (pretrained_need_store) {
+            for (int dim = 0; dim < 3; ++dim) {
+              rgp_vec[dim]->storePosteriorPretrained();
+            }
+            pretrained_need_store = false;
+          }
+          for (int dim = 0; dim < 3; ++dim) {
+            rgp_vec[dim]->add_pattern_batch(gp_input, uvr_derivatives(dim));
+          }
+        }
+      }
+      std::cout << "Completed prediction with recursive update(without "
+                   "hyperparameter update)."
+                << std::endl;
+      visualize_full_state_with_cov(state_pred_vec_recursive_wo_hyperUpdate,
+                                    state_cov_vec_recursive_wo_hyperUpdate,
+                                    train_data.state, train_data.time);
+      save_to_csv(ws_path, "rec_wo_hyperUpdate",
+                  state_pred_vec_recursive_wo_hyperUpdate,
+                  state_cov_vec_recursive_wo_hyperUpdate, train_data.time);
+
+      // 重新传播一次，看是否能对整段轨迹进行更好的拟合
+      std::vector<Eigen::VectorXd>
+          state_pred_vec_recursive_wo_hyperUpdate_reprop;
+      std::vector<Eigen::MatrixXd>
+          state_cov_vec_recursive_wo_hyperUpdate_reprop;
+      state_curr = train_data.state[0];
+      cov_curr = state_meas_cov;
+      state_pred_vec_recursive_wo_hyperUpdate_reprop.push_back(state_curr);
+      state_cov_vec_recursive_wo_hyperUpdate_reprop.push_back(cov_curr);
+
+      for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
+        if (k % epoch_size == 0 && k > 0) {
+          // reset to true state at the beginning of each batch
+          state_curr = train_data.state[k + 1];
+          cov_curr = state_meas_cov;
+        } else {
+          // propagate with RK4 Simulator
+          double dt = train_data.time[k + 1] - train_data.time[k];
+          if (dt <= 0)
+            dt = 1e-4;
+          Eigen::VectorXd u = train_data.control.empty()
+                                  ? Eigen::VectorXd()
+                                  : train_data.control[k];
+          std::tie(state_curr, cov_curr) =
+              rk4_simulator_.step_with_uncertainty(state_curr, u, dt, cov_curr);
+        }
+        state_pred_vec_recursive_wo_hyperUpdate_reprop.push_back(state_curr);
+        state_cov_vec_recursive_wo_hyperUpdate_reprop.push_back(cov_curr);
+      }
+      std::cout << "Repropagate prediction after hyperparameter update."
+                << std::endl;
+      visualize_full_state_with_cov(
+          state_pred_vec_recursive_wo_hyperUpdate_reprop,
+          state_cov_vec_recursive_wo_hyperUpdate_reprop, train_data.state,
+          train_data.time);
+      save_to_csv(ws_path, "rec_wo_hyperUpdate_reprop",
+                  state_pred_vec_recursive_wo_hyperUpdate_reprop,
+                  state_cov_vec_recursive_wo_hyperUpdate_reprop, train_data.time);
     }
-    std::cout << "Completed prediction with recursive update." << std::endl;
-    visualize_full_state_with_cov(state_pred_vec_recursive_wo_hyperUpdate,
-                                  state_cov_vec_recursive_wo_hyperUpdate,
-                                  train_data.state, train_data.time);
-
     std::cout << "\n\033[34m========== Done ==========\033[0m\n" << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;

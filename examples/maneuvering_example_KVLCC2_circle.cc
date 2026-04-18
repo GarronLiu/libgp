@@ -249,8 +249,8 @@ int main(int argc, char const *argv[]) {
     size_t max_runs = 10;
     size_t clusters = 50;
     size_t max_iters = 50;
-    size_t downsample_rate = 2;
-    std::vector<std::string> algorithms = {"DE"};
+    size_t downsample_rate = 5;
+    std::vector<std::string> algorithms = {"CG"};
     for (size_t run_id = 0; run_id < max_runs; run_id++) {
       for (size_t algorithm_id = 0; algorithm_id < algorithms.size();
            algorithm_id++) {
