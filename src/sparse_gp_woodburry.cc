@@ -539,6 +539,8 @@ void SparseGaussianProcess::add_pattern(const double x[], double y) {
   if (n % 100 == 0) {
     std::cout << "added " << n << " samples to training set." << std::endl;
   }
+  cf->loghyper_changed = true; // trigger recomputation in compute()
+
 }
 
 void SparseGaussianProcess::specify_inducingSet(

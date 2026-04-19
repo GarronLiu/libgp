@@ -554,6 +554,125 @@ int main(int argc, char const *argv[]) {
                   state_pred_vec_recursive_wo_hyperUpdate_reprop,
                   state_cov_vec_recursive_wo_hyperUpdate_reprop, train_data.time);
     }
+
+    // 4.1.3 非流式更新
+    {
+      //重新加载预训练模型，确保在无超参更新的情况下进行预测
+      rgp_vec.clear();
+      rgp_vec.resize(3);
+      for (size_t i = 0; i < model_files.size(); ++i) {
+        rgp_vec[i] =
+            std::make_unique<SparseGaussianProcess>(model_files[i].c_str());
+      }
+      rk4_update();
+
+      std::vector<Eigen::VectorXd> state_pred_vec_common_sgp_update;
+      std::vector<Eigen::MatrixXd> state_cov_vec_common_sgp_update;
+      state_curr = train_data.state[0];
+      cov_curr = state_meas_cov;
+      state_pred_vec_common_sgp_update.push_back(state_curr);
+      state_cov_vec_common_sgp_update.push_back(cov_curr);
+      bool pretrained_need_store = true;
+      for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
+        if (k % epoch_size == 0 && k > 0) {
+          // reset to true state at the beginning of each batch
+          state_curr = train_data.state[k + 1];
+          cov_curr = state_meas_cov;
+          libgp::CG optimizer;
+          optimizer.maximize(rgp_vec[0].get(), 15, 0);
+          optimizer.maximize(rgp_vec[1].get(), 5, 0);
+          optimizer.maximize(rgp_vec[2].get(), 10, 0);
+          pretrained_need_store = true;
+
+          rk4_update();
+
+        } else {
+          // propagate with RK4 Simulator
+          double dt = train_data.time[k + 1] - train_data.time[k];
+          if (dt <= 0)
+            dt = 1e-4;
+          Eigen::VectorXd u = train_data.control.empty()
+                                  ? Eigen::VectorXd()
+                                  : train_data.control[k];
+          std::tie(state_curr, cov_curr) =
+              rk4_simulator_.step_with_uncertainty(state_curr, u, dt, cov_curr);
+        }
+        state_pred_vec_common_sgp_update.push_back(state_curr);
+        state_cov_vec_common_sgp_update.push_back(cov_curr);
+
+        // 计算uvr的中心微分
+        if (k > 0 && k < train_data.state.size() - 2) {
+          double dt_fwd = train_data.time[k + 1] - train_data.time[k];
+          double dt_bwd = train_data.time[k] - train_data.time[k - 1];
+          auto dx_fwd = train_data.state[k + 1].segment(3, 3) -
+                        train_data.state[k].segment(3, 3);
+          auto dx_bwd = train_data.state[k].segment(3, 3) -
+                        train_data.state[k - 1].segment(3, 3);
+          auto uvr_derivatives = (dx_fwd / dt_fwd + dx_bwd / dt_bwd) / 2.0;
+          Eigen::VectorXd gp_input(5);
+          gp_input << train_data.state[k](3), train_data.state[k](4),
+              train_data.state[k](5), train_data.control[k](0),
+              train_data.control[k](1);
+
+          if (pretrained_need_store) {
+            for (int dim = 0; dim < 3; ++dim) {
+              rgp_vec[dim]->sampleset->clear(); 
+            }
+            pretrained_need_store = false;
+          }
+          for (int dim = 0; dim < 3; ++dim) {
+            rgp_vec[dim]->add_pattern(gp_input.data(), uvr_derivatives(dim));
+          }
+        }
+      }
+      std::cout << "Completed prediction with common sgp update."
+                << std::endl;
+      visualize_full_state_with_cov(state_pred_vec_common_sgp_update,
+                                    state_cov_vec_common_sgp_update,
+                                    train_data.state, train_data.time);
+      save_to_csv(ws_path, "common_sgp_update",
+                  state_pred_vec_common_sgp_update,
+                  state_cov_vec_common_sgp_update, train_data.time);
+
+      // 重新传播一次，看是否能对整段轨迹进行更好的拟合
+      std::vector<Eigen::VectorXd>
+          state_pred_vec_common_sgp_update_reprop;
+      std::vector<Eigen::MatrixXd>
+          state_cov_vec_common_sgp_update_reprop;
+      state_curr = train_data.state[0];
+      cov_curr = state_meas_cov;
+      state_pred_vec_common_sgp_update_reprop.push_back(state_curr);
+      state_cov_vec_common_sgp_update_reprop.push_back(cov_curr);
+
+      for (size_t k = 0; k < train_data.state.size() - 1; ++k) {
+        if (k % epoch_size == 0 && k > 0) {
+          // reset to true state at the beginning of each batch
+          state_curr = train_data.state[k + 1];
+          cov_curr = state_meas_cov;
+        } else {
+          // propagate with RK4 Simulator
+          double dt = train_data.time[k + 1] - train_data.time[k];
+          if (dt <= 0)
+            dt = 1e-4;
+          Eigen::VectorXd u = train_data.control.empty()
+                                  ? Eigen::VectorXd()
+                                  : train_data.control[k];
+          std::tie(state_curr, cov_curr) =
+              rk4_simulator_.step_with_uncertainty(state_curr, u, dt, cov_curr);
+        }
+        state_pred_vec_common_sgp_update_reprop.push_back(state_curr);
+        state_cov_vec_common_sgp_update_reprop.push_back(cov_curr);
+      }
+      std::cout << "Repropagate prediction after common sgp update."
+                << std::endl;
+      visualize_full_state_with_cov(
+          state_pred_vec_common_sgp_update_reprop,
+          state_cov_vec_common_sgp_update_reprop, train_data.state,
+          train_data.time);
+      save_to_csv(ws_path, "common_sgp_update_reprop",
+                  state_pred_vec_common_sgp_update_reprop,
+                  state_cov_vec_common_sgp_update_reprop, train_data.time);
+    }
     std::cout << "\n\033[34m========== Done ==========\033[0m\n" << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;
